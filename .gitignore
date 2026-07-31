@@ -1,0 +1,17 @@
+# === 工具 / IDE 本地配置（不应提交） ===
+# Claude Code 本地会话配置
+.claude/
+# JetBrains IDE 项目文件
+.idea/
+# workbuddy 工具记忆文件
+.workbuddy/
+
+# === Python ===
+__pycache__/
+*.py[cod]
+
+# === macOS ===
+.DS_Store
+
+# === 预处理生成产物（可随时重新生成） ===
+*_preprocessed.png

@@ -212,7 +212,36 @@ python main.py images/test.png --model models/<模型名>.onnx
 
 ---
 
-## 四、常见问题
+## 四、自动化测试
+
+项目内置 pytest 测试套件（`test_captcha.py`），覆盖核心识别能力和择优逻辑：
+
+```bash
+# 安装测试依赖
+pip install pytest
+
+# 运行全部测试（25 项，约 7 秒）
+pytest test_captcha.py -v
+
+# 只跑困难样例
+pytest test_captcha.py -v -k "test_png"
+
+# 只跑择优逻辑单元测试（秒完，无需加载模型）
+pytest test_captcha.py::TestPickBest -v
+```
+
+测试覆盖：
+
+| 测试类 | 覆盖内容 |
+|--------|----------|
+| `TestCoreRecognition` | 三个样例（test.png→xf4y4、test2.jpg→kdqu、test3.png→phhxx）的默认参数 / 指定长度 / 候选非空 / 结果合法性 |
+| `TestDifficultCase` | 困难样例专项：x 不漏读、x 不误读为 i、深增强变体存在、正确答案在候选中 |
+| `TestCLI` | 命令行调用 stdout 含正确结果、不存在的图片退出码 1 |
+| `TestPickBest` | 择优逻辑单元测试：多数投票、排他性子序列支持、长度偏好、空候选、滑动窗口 |
+
+---
+
+## 五、常见问题
 
 - **识别结果多了 `?` 或非字母数字**：通常是预处理/分割不理想，用 `--length` 指定长度、或加 `--binary` 重试。
 - **逐字符模式结果差**：逐字符是兜底策略，依赖字符间空隙；粘连严重的图优先用整图 + gamma。
@@ -221,7 +250,7 @@ python main.py images/test.png --model models/<模型名>.onnx
 
 ---
 
-## License
+## 六、License
 
 本项目基于 [MIT License](LICENSE) 开源，可自由使用、修改和分发。
 

@@ -236,10 +236,13 @@ def recognize_per_char(image, length=None, beta=True, gamma=1.3):
 def pick_best(results, expect_len=None):
     """从 [(label, text), ...] 中挑选最可信结果.
 
-    OCR 中"漏字"(细/小字符被忽略)远多于"幻觉多字", 因此无期望长度时
-    偏好更长的纯字母数字结果, 尽量完整; 给定 --length 时优先匹配长度.
+    多个独立结果(不同预处理/模型/方法)的一致性是强证据, 优先于长度:
+    逐字符分割易因噪声/粘连产生"多字"幻觉(如把 4 位读成 10 位),
+    而整图识别极少多字, 因此不能盲目相信更长的结果. 同票时再偏好
+    更长, 弥补整图识别可能漏掉细/小字符; 给定 --length 时优先匹配长度.
     """
     import re
+    from collections import Counter
     pool = []
     for label, text in results:
         text = (text or "").strip()
@@ -256,11 +259,13 @@ def pick_best(results, expect_len=None):
         else:
             pool = sorted(pool, key=lambda x: abs(len(x[1]) - expect_len))[:3]
 
+    votes = Counter(t for _, t in pool)
+
     def rank(item):
         label, text = item
-        return (len(text),            # 更长更完整
-                1 if text == text.lower() else 0,  # 小写风格
-                -(len(text) * 10 + len(pool)))
+        return (votes[text],          # 多条结果一致优先
+                len(text),            # 同票数偏好更长(补漏字)
+                1 if text == text.lower() else 0)  # 小写风格
 
     pool.sort(key=rank, reverse=True)
     return pool[0][1]

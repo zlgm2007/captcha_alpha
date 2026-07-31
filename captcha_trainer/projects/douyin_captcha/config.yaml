@@ -1,0 +1,23 @@
+Model:
+    CharSet: []
+    ImageChannel: 1
+    ImageHeight: 64
+    ImageWidth: -1
+    Word: false
+System:
+    Allow_Ext: [jpg, jpeg, png, bmp]
+    GPU: false
+    GPU_ID: 0
+    Path: ''
+    Project: douyin_captcha
+    Val: 0.03
+Train:
+    BATCH_SIZE: 32
+    CNN: {NAME: ddddocr}
+    DROPOUT: 0.0
+    LR: 0.01
+    OPTIMIZER: SGD
+    SAVE_CHECKPOINTS_STEP: 2000
+    TARGET: {Accuracy: 0.97, Cost: 0.05, Epoch: 20}
+    TEST_BATCH_SIZE: 32
+    TEST_STEP: 1000

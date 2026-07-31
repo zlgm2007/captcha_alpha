@@ -13,8 +13,8 @@
 import argparse
 import os
 
-from ddddocrImg import pick_best, recognize_multi, recognize_per_char, recognize
-from preImg import preprocess
+from ddddocrImg import pick_best, recognize_multi, recognize_per_char, recognize, _binarize
+from preImg import preprocess, repair_noise_blocks, detect_noise_blocks
 
 DEFAULT_IMAGE = os.path.join("images", "test.png")
 
@@ -64,6 +64,7 @@ def main():
 
     # 2. 构建多组预处理变体(不同组合对不同验证码各有优势)
     variants = []
+    noise_blocks = []
     if args.binary:
         variants.append(("二值化", processed))
     else:
@@ -75,6 +76,16 @@ def main():
                                                bg_whiten=0)))
         # 原图: 不经任何预处理
         variants.append(("原图", None))
+        # 噪点修复: 检测并抹白盖在字符上的实心矩形噪点(抖音干扰), gamma二值化
+        try:
+            from ddddocrImg import to_gray
+            gray = to_gray(args.image)
+            noise_blocks = detect_noise_blocks(gray)
+            repaired = repair_noise_blocks(gray)
+            variants.append(("噪点修复", _binarize(repaired, gamma=args.gamma)))
+        except Exception as e:
+            noise_blocks = []
+            print(f"[警告] 噪点修复变体不可用: {e}")
 
     # 3. 逐变体识别
     candidates = []
@@ -121,6 +132,17 @@ def main():
         return 1
 
     best = pick_best(candidates, expect_len=args.length)
+
+    # 检测到噪点块时: 噪点修复结果代表"去噪后"读数, 若与最优结果等长且为有效
+    # 字母数字串, 优先采用(修复后长度变化通常说明误抹了字符笔画, 则不采用).
+    if noise_blocks:
+        import re
+        repair_result = next(
+            (t for label, t in candidates
+             if "噪点修复" in label and re.fullmatch(r"[A-Za-z0-9]{2,}", t)),
+            None)
+        if repair_result and len(repair_result) == len(best):
+            best = repair_result
 
     # 6. 输出
     print("=" * 50)

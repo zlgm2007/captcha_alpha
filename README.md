@@ -5,7 +5,9 @@
 1. **识别**：预处理增强 + ddddocr 识别（`main.py`）
 2. **训练**：用 dddd_trainer 训练特定验证码的专用模型，提升识别率（`captcha_trainer/`）
 
-本目录**不依赖 spider_test 工程其他模块**，可独立使用。
+本目录**不依赖 spiderNestMVP 工程其他模块**，可独立使用。
+
+**项目目标**：解决通用 OCR 模型识别**困难验证码**的问题。对清晰简单的验证码，通用 ddddocr 已能稳定识别；但面对细笔画、字符粘连、噪声干扰的验证码，通用模型会漏字/误字。项目通过「预处理增强 + 多策略择优 + 逐字符兜底」提升裸识别率，并在此基础上训练专用模型进一步逼近正确答案。
 
 ---
 
@@ -18,7 +20,8 @@ tools/
     ├── preImg.py          # 图片预处理模块（去噪/gamma/背景提白/放大/二值化）
     ├── ddddocrImg.py      # ddddocr 识别模块（整图 / 逐字符，支持自定义模型）
     ├── label_tool.py      # 标注工具（OCR 预填 + 人工校正）
-    ├── images/test.png    # 测试样例（正确答案 xf4y4）
+    ├── images/test.png    # 困难测试样例（正确答案 xf4y4，通用模型识别为 f4y4）
+    ├── images/test2.jpg   # 简单测试样例（正确答案 kdqu，可稳定识别）
     ├── captcha_data/
     │   ├── raw/           # 待标注图片目录
     │   └── labeled/       # 标注输出目录（label_hash.png）
@@ -46,19 +49,34 @@ pip install fire loguru pyyaml tqdm numpy pillow
 
 ### 1. 一键识别
 
+项目内置两张测试样例，一简单一困难：
+
+
+| 图片               | 难度                           | 正确答案 | 通用模型当前输出                         |
+| ------------------ | ------------------------------ | -------- | ---------------------------------------- |
+| `images/test2.jpg` | 简单：笔画清晰、无粘连         | `kdqu`   | `kdqu`（正确）                           |
+| `images/test.png`  | 困难：首字符`x` 笔画细、带噪声 | `xf4y4`  | `f4y4`（漏掉首字符；逐字符读成 `if4y4`） |
+
+困难样例 `test.png`（正确答案 `xf4y4`）：
+
+![困难样例 images/test.png（正确答案 xf4y4）](images/test.png)
+
 ```bash
 cd tools/captcha_tool
-python main.py images/test.png
+python main.py images/test2.jpg   # 简单样例 → 输出 kdqu
+python main.py images/test.png    # 困难样例 → 输出 f4y4（应为 xf4y4）
 ```
 
-输出各策略候选与最终验证码：
+以困难样例 `test.png` 为例，输出各策略候选与最终验证码：
 
 ```
-验证码    : if4y4
+验证码    : f4y4
 ```
 这里还不完善，还在处理，正确答案是 xf4y4
 
-`main.py` 内置多策略：增强预处理 / 纯 gamma / 原图 / 逐字符分割，各用 beta 与标准模型识别，最后按「更长更完整、纯字母数字」原则择优。`--length` 可指定验证码长度压制杂音。
+`main.py` 内置多策略：增强预处理 / 纯 gamma / 原图 / 逐字符分割，各用 beta 与标准模型识别，最后按「多策略结果一致优先、同票偏好更长、纯字母数字」原则择优。`--length` 可指定验证码长度压制杂音。
+
+> 注意：对 `test.png` 这类困难验证码，通用模型会把首字符 `x` 漏掉（整图读出 `f4y4`）或误读（逐字符读出 `if4y4`）。**这正是本项目要解决的问题**——见第三节，通过预处理调优与训练专用模型逼近正确答案 `xf4y4`。
 
 ### 2. main.py 参数
 

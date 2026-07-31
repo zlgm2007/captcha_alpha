@@ -16,21 +16,39 @@
 ## 目录结构
 
 ```
-tools/
-└── captcha_tool/            # 验证码识别与训练工具（本目录）
-    ├── main.py            # 主程序入口：预处理 + 识别 + 择优，输出验证码
-    ├── preImg.py          # 图片预处理模块（去噪/gamma/背景提白/放大/二值化/噪点修复）
-    ├── ddddocrImg.py      # ddddocr 识别模块（整图 / 逐字符，支持自定义模型）
-    ├── label_tool.py      # 标注工具（OCR 预填 + 人工校正）
-    ├── images/test.png    # 困难测试样例（正确答案 xf4y4，已修复）
-    ├── images/test2.jpg   # 简单测试样例（正确答案 kdqu，可稳定识别）
-    ├── captcha_data/
-    │   ├── raw/           # 待标注图片目录
-    │   └── labeled/       # 标注输出目录（label_hash.png）
-    ├── captcha_trainer/   # dddd_trainer 训练框架（已适配 Python 3.12 + 新版 torch）
-    │   └── projects/douyin_captcha/   # 训练项目（已配置）
-    └── models/            # 训练产物存放目录（onnx + charsets.json）
+captcha_alpha/                            # 验证码识别与训练工具（仓库根目录）
+├── README.md                           # 本文档
+├── .gitignore                          # git 提交规则（忽略 IDE/工具配置、缓存、预处理产物）
+├── main.py                             # 主程序入口：预处理 + 识别 + 择优，输出验证码
+├── preImg.py                           # 图片预处理模块（去噪/gamma/背景提白/放大/二值化/噪点修复）
+├── ddddocrImg.py                       # ddddocr 识别模块（整图 / 逐字符，支持自定义模型）
+├── label_tool.py                       # 标注工具（OCR 预填 + 人工校正）
+├── images/
+│   ├── test.png                        # 困难测试样例（正确答案 xf4y4，已修复）
+│   ├── test2.jpg                       # 简单测试样例（正确答案 kdqu，可稳定识别）
+│   ├── test3.png                       # 测试样例（输出 phhxx）
+│   └── bc_0001-3.png                   # 真实抖音验证码样本（验证预处理不误伤干净图）
+├── captcha_data/
+│   ├── raw/                            # 待标注图片目录
+│   └── labeled/                        # 标注输出目录（label_hash.png）
+├── captcha_trainer/                    # dddd_trainer 训练框架（已适配 Python 3.12 + 新版 torch）
+│   ├── app.py                          # 训练 CLI（create / cache / train）
+│   ├── configs/                        # 全局配置基类
+│   ├── nets/backbone/                  # 可选骨干网络（ddddocr / efficientnet / mobilenet）
+│   ├── utils/                          # 缓存 / 加载 / 训练工具
+│   ├── projects/douyin_captcha/        # 训练项目（已配置）
+│   │   ├── config.yaml                 # 项目配置（GPU/灰度/高度/宽度/CRNN）
+│   │   ├── cache/                      # 标注缓存（训练时自动生成）
+│   │   ├── checkpoints/                # 训练 checkpoint（训练时自动生成）
+│   │   └── models/                     # 导出模型 onnx + charsets.json（训练时自动生成）
+│   └── requirements.txt                # 依赖清单（已适配 Python 3.12 + 新版 torch）
+├── models/                             # 训练产物存放目录（onnx + charsets.json）
+└── doc/
+    ├── captcha-recognition-optimization.md  # 困难样例优化方案（根因诊断/参数扫描/投票）
+    └── images/验证码识别解决方案流程.png       # 方案流程图
 ```
+
+> 项目现为独立仓库，根目录即上述结构，文档内命令均从根目录执行。
 
 ---
 
@@ -64,7 +82,6 @@ pip install fire loguru pyyaml tqdm numpy pillow
 ![困难样例 images/test.png（正确答案 xf4y4）](images/test.png)
 
 ```bash
-cd tools/captcha_tool
 python main.py images/test2.jpg   # 简单样例 → 输出 kdqu
 python main.py images/test.png    # 困难样例 → 输出 xf4y4（已修复）
 ```
@@ -146,7 +163,6 @@ python ddddocrImg.py images/test.png --per-char --length 5
 ### 2. 标注（OCR 预填 + 人工校正）
 
 ```bash
-cd tools/captcha_tool
 python label_tool.py
 # 指定目录/长度：
 python label_tool.py --raw captcha_data/raw --labeled captcha_data/labeled --length 5
@@ -170,7 +186,7 @@ python label_tool.py --raw captcha_data/raw --labeled captcha_data/labeled --len
 ### 3. 训练
 
 ```bash
-cd tools/captcha_tool/captcha_trainer
+cd captcha_trainer
 python app.py cache douyin_captcha ../captcha_data/labeled   # 生成缓存+字符集
 python app.py train douyin_captcha                            # CPU 训练
 ```

@@ -19,7 +19,10 @@
 captcha_alpha/                            # 验证码识别与训练工具（仓库根目录）
 ├── README.md                           # 本文档
 ├── .gitignore                          # git 提交规则（忽略 IDE/工具配置、缓存、预处理产物）
-├── main.py                             # 主程序入口：预处理 + 识别 + 择优，输出验证码
+├── main.py                             # CLI 入口：参数解析 + 格式化输出（调用 api.py）
+├── api.py                              # API 层：CaptchaRecognizer 类，供 SDK 调用
+├── mcp_server.py                       # MCP Server：暴露识别能力给 AI Agent（WorkBuddy/Claude）
+├── test_captcha.py                     # pytest 测试套件（46 项，覆盖识别 + API + 择优逻辑）
 ├── preImg.py                           # 图片预处理模块（去噪/gamma/背景提白/放大/二值化/噪点修复）
 ├── ddddocrImg.py                       # ddddocr 识别模块（整图 / 逐字符，支持自定义模型）
 ├── label_tool.py                       # 标注工具（OCR 预填 + 人工校正）
@@ -149,6 +152,82 @@ python ddddocrImg.py images/test.png --per-char --length 5
 此外还引入了**滑动窗口子串投票**（对 `ixf4y4` 等 6 字符输出提取 5 字符子串参与投票）和**自动推断长度**（未指定 `--length` 时也启用高阶择优）。
 
 > 完整技术方案（含根因诊断、参数搜索过程、投票权重计算、6 张 Mermaid 流程图）详见 **[doc/captcha-recognition-optimization.md](doc/captcha-recognition-optimization.md)**。
+
+### 5. API 层调用（作为 SDK 使用）
+
+核心识别逻辑封装在 `api.py` 中，可直接作为 Python 库调用，不必走 CLI：
+
+```python
+from api import CaptchaRecognizer, recognize
+
+# 方式 1: 实例化识别器（模型自动缓存，多次调用不重复加载）
+recognizer = CaptchaRecognizer()
+result = recognizer.recognize("images/test.png")
+print(result.text)        # "xf4y4"
+print(result.confidence)  # 0.62
+print(result.candidates)  # 全部候选列表
+
+# 指定验证码长度
+result = recognizer.recognize("images/test.png", length=5)
+
+# 支持 bytes 输入（适合网络请求场景）
+with open("images/test.png", "rb") as f:
+    result = recognizer.recognize(f.read())
+
+# 支持 numpy.ndarray 输入
+import cv2
+img = cv2.imread("images/test.png")
+result = recognizer.recognize(img)
+
+# 批量识别
+results = recognizer.recognize_batch(["images/test.png", "images/test2.jpg"])
+for r in results:
+    print(r.text, r.confidence)
+
+# 使用自定义训练模型
+recognizer = CaptchaRecognizer(model_path="models/custom.onnx")
+
+# 方式 2: 快捷函数（全局单例，适合一次性调用）
+result = recognize("images/test.png")
+```
+
+`CaptchaResult` 结构体：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `text` | `str` | 最终验证码（择优后） |
+| `candidates` | `List[Candidate]` | 全部候选，每个含 `label` 和 `text` |
+| `confidence` | `float` | 置信度（0~1），最终结果在候选中的得票占比 |
+| `length` | `int` | 最终结果字符长度 |
+
+### 6. MCP Server 集成（AI Agent 调用）
+
+项目提供 MCP Server（`mcp_server.py`，127 行），将验证码识别能力暴露为 MCP 工具，让 WorkBuddy / Claude 等 AI Agent 可直接调用：
+
+```python
+# mcp_server.py 暴露 3 个工具:
+#   recognize_captcha(image_path, length=0)        → 单张识别(文件路径)
+#   recognize_captcha_base64(image_b64, length=0)  → 单张识别(base64输入)
+#   recognize_captcha_batch(image_paths, length=0) → 批量识别
+```
+
+**注册到 WorkBuddy**：在 `~/.workbuddy/mcp.json` 中添加：
+
+```json
+{
+  "mcpServers": {
+    "captcha": {
+      "command": "/path/to/python3",
+      "args": ["/path/to/mcp_server.py"],
+      "cwd": "/path/to/captcha_alpha"
+    }
+  }
+}
+```
+
+注册后在 WorkBuddy 连接器管理页面点击「Trust」启用。之后 AI Agent 可直接通过 MCP 协议调用 `recognize_captcha` 工具识别验证码。
+
+**发布为 WorkBuddy 技能**：项目已打包为 `captcha-recognition.zip` 技能包，包含 SKILL.md（使用说明）和 API 参考文档。安装后 WorkBuddy 会在用户需要识别验证码时自动触发。
 
 ---
 

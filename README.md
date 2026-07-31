@@ -55,6 +55,29 @@ captcha_alpha/                            # 验证码识别与训练工具（仓
 
 ---
 
+## 〇、快速安装（一键接入 WorkBuddy AI Agent）
+
+```bash
+# 1. clone 项目
+git clone https://github.com/zlgm2007/captcha_alpha.git
+cd captcha_alpha
+
+# 2. 装依赖
+pip install -r requirements.txt
+
+# 3. 注册 MCP Server（脚本自动写入 mcp.json）
+python setup_mcp.py
+
+# 4. 导入技能包（setup_mcp.py 已自动完成，此步为手动备选）
+cp -r captcha-recognition ~/.workbuddy/skills/
+```
+
+> 安装完成后：重启 WorkBuddy → 右上角连接器管理 → 找到 `captcha` → 点击「Trust」启用 → 在对话中说「识别验证码 /path/to/captcha.png」即可调用。
+>
+> 仅用命令行？跳过步骤 3-4，直接 `python main.py images/test.png` 即可。
+
+---
+
 ## 一、环境依赖
 
 训练需要以下 Python 包（识别只需 `ddddocr` / `opencv` / `numpy`）：

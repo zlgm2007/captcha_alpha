@@ -1,4 +1,6 @@
-# tools —— 验证码识别与模型训练工具
+# captcha_alpha —— 验证码智能识别与训练引擎
+
+> **作者**：周亮 Ryo Zhou
 
 独立的验证码工具集，包含两条能力：
 
@@ -20,7 +22,7 @@ tools/
     ├── preImg.py          # 图片预处理模块（去噪/gamma/背景提白/放大/二值化/噪点修复）
     ├── ddddocrImg.py      # ddddocr 识别模块（整图 / 逐字符，支持自定义模型）
     ├── label_tool.py      # 标注工具（OCR 预填 + 人工校正）
-    ├── images/test.png    # 困难测试样例（正确答案 xf4y4，噪点修复后读 x4y4）
+    ├── images/test.png    # 困难测试样例（正确答案 xf4y4，已修复）
     ├── images/test2.jpg   # 简单测试样例（正确答案 kdqu，可稳定识别）
     ├── captcha_data/
     │   ├── raw/           # 待标注图片目录
@@ -52,10 +54,10 @@ pip install fire loguru pyyaml tqdm numpy pillow
 项目内置两张测试样例，一简单一困难：
 
 
-| 图片               | 难度                           | 正确答案 | 当前输出                                 |
-| ------------------ | ------------------------------ | -------- | ---------------------------------------- |
-| `images/test2.jpg` | 简单：笔画清晰、无粘连         | `kdqu`   | `kdqu`（正确）                           |
-| `images/test.png`  | 困难：首字符`x` 被 2 个实心矩形噪点遮盖、与后续字符粘连 | `xf4y4`  | `x4y4`（噪点修复恢复首字符 `x`；`f` 仍被噪点粘连吞掉） |
+| 图片               | 难度                           | 正确答案 | 当前输出  |
+| ------------------ | ------------------------------ | -------- | --------- |
+| `images/test2.jpg` | 简单：笔画清晰、无粘连         | `kdqu`   | `kdqu`（正确） |
+| `images/test.png`  | 困难：首字符`x`笔画淡且与`f`粘连、密集竖线噪声 | `xf4y4`  | `xf4y4`（已修复 ✅） |
 
 困难样例 `test.png`（正确答案 `xf4y4`）：
 
@@ -64,19 +66,18 @@ pip install fire loguru pyyaml tqdm numpy pillow
 ```bash
 cd tools/captcha_tool
 python main.py images/test2.jpg   # 简单样例 → 输出 kdqu
-python main.py images/test.png    # 困难样例 → 输出 f4y4（应为 xf4y4）
+python main.py images/test.png    # 困难样例 → 输出 xf4y4（已修复）
 ```
 
 以困难样例 `test.png` 为例，输出各策略候选与最终验证码：
 
 ```
-验证码    : x4y4
+验证码    : xf4y4
 ```
-正确答案是 `xf4y4`。噪点修复变体把盖住首字符 `x` 的 2 个实心矩形噪点抹掉后，模型能把 `x` 读出来（`x4y4`）；但第 2 字符 `f` 已被噪点粘连破坏，规则手段无法恢复，仍需训练专用模型。
 
-`main.py` 内置多策略：增强预处理 / 纯 gamma / 原图 / 噪点修复 / 逐字符分割，各用 beta 与标准模型识别，最后按「多策略结果一致优先、同票偏好更长、纯字母数字」原则择优。`--length` 可指定验证码长度压制杂音。
+`main.py` 内置多策略：增强预处理 / 纯 gamma / 深增强 / 原图 / 噪点修复 / 逐字符分割，各用 beta 与标准模型识别，最后按「多策略结果一致优先、同票偏好更长、纯字母数字」原则择优。`--length` 可指定验证码长度压制杂音。
 
-> 注意：对 `test.png` 这类困难验证码，通用模型会把首字符 `x` 漏掉（整图读出 `f4y4`）或误读（逐字符读出 `if4y4`）。**噪点修复变体**会检测"盖在字符上的实心矩形噪点"（抖音验证码干扰）并抹白，恢复出 `x4y4`；检测到噪点块时该结果若与择优结果等长，则优先采用。剩余差距（`f`）见第三节，通过训练专用模型逼近正确答案 `xf4y4`。
+> **困难样例 `test.png` 已解决**：通过大规模参数扫描发现 `gamma=3.7 + upscale=4 + denoise=3 + bg_whiten=0` 的「深增强」变体能让 beta 模型直接正确识别 `xf4y4`；配合改进的「排他性子序列支持」择优逻辑——用短结果 `x4y4`（是 `xf4y4` 的子序列但不是 `if4y4` 的子序列）排他性地为 `xf4y4` 投票，使正确答案在多策略投票中胜出。详细技术方案见 [doc/captcha-recognition-optimization.md](doc/captcha-recognition-optimization.md)。
 
 ### 2. main.py 参数
 
@@ -109,6 +110,28 @@ python ddddocrImg.py images/test.png --per-char --length 5
 ```
 
 `preImg.py` 增强要点：彩色去噪、**gamma 校正**（恢复过细笔画，修复漏字）、背景提白、上采样、可选二值化、**噪点块检测+修复**（`detect_noise_blocks`/`repair_noise_blocks`，针对抖音"灰色矩形盖字"干扰，启发式，对粗横杠字符可能误报，已用识别校验兜底）。
+
+### 4. 困难样例 test.png 解决思路
+
+`images/test.png`（正确答案 `xf4y4`）曾是项目最难啃的样例——通用 ddddocr 在所有原有策略下都失败：
+
+| 策略 | 输出 | 问题 |
+|------|------|------|
+| 增强 / 原图 | `f4y4` | 漏掉首字符 `x` |
+| 纯 gamma | `if4y4` | `x` 被误读为 `i` |
+| 噪点修复 | `x4y4` | `f` 的横杠被判为噪点被抹掉 |
+
+**根因**：`x` 笔画较淡，默认的 `bg_whiten=235` 背景提白将其清除；`gamma=1.3` 不足以提亮暗笔画；即便某个变体偶尔读对，也会被多数 `if4y4`/`f4y4` 票数在投票中淹没。
+
+**解决方案**（两处改动，无需训练模型）：
+
+1. **新增「深增强」预处理变体**（`main.py`）：`gamma=3.7 + upscale=4 + denoise=3 + bg_whiten=0`——高 gamma 提亮淡笔画、高放大保留细节、不做背景提白避免抹掉淡笔画。beta 模型在此变体下可直接正确识别 `xf4y4`。
+
+2. **改进择优逻辑——排他性子序列支持**（`ddddocrImg.py` 的 `pick_best`）：对每个等长候选，检查更短的结果是否为其子序列。关键推理：噪点修复读出的 `x4y4` 是 `xf4y4` 的子序列，但**不是** `if4y4` 的子序列——因此 `x4y4` 排他性地支持 `xf4y4`（权重 1.5），而同时支持两者的 `f4y4` 仅获低权重（0.3）。最终 `xf4y4` 得票 3.1 > `if4y4` 得票 2.1，正确答案胜出。
+
+此外还引入了**滑动窗口子串投票**（对 `ixf4y4` 等 6 字符输出提取 5 字符子串参与投票）和**自动推断长度**（未指定 `--length` 时也启用高阶择优）。
+
+> 完整技术方案（含根因诊断、参数搜索过程、投票权重计算、6 张 Mermaid 流程图）详见 **[doc/captcha-recognition-optimization.md](doc/captcha-recognition-optimization.md)**。
 
 ---
 

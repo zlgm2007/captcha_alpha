@@ -240,6 +240,15 @@ def pick_best(results, expect_len=None):
     逐字符分割易因噪声/粘连产生"多字"幻觉(如把 4 位读成 10 位),
     而整图识别极少多字, 因此不能盲目相信更长的结果. 同票时再偏好
     更长, 弥补整图识别可能漏掉细/小字符; 给定 --length 时优先匹配长度.
+
+    高阶择优(指定 expect_len 时启用):
+    1. 滑动窗口: 对长输出(>L)提取所有 L 长连续子串参与投票, 边缘裁剪
+       越少权重越高 —— 应对 OCR 两端噪声(如 ixf4y4 → xf4y4).
+    2. 排他性子序列支持: 对每个唯一短结果(2≤len<L), 检查它是哪些 L 长
+       候选的子序列. 若仅匹配一个候选 → 排他支持(权重 1.5, 强证据);
+       若匹配多个 → 模糊支持(权重 0.3, 弱). 
+       如 x4y4 仅是 xf4y4 的子序列(不是 if4y4 的) → 强力支持 xf4y4.
+    3. "逐字符"结果已知噪声大, 投票权重降为 0.5.
     """
     import re
     from collections import Counter
@@ -252,6 +261,60 @@ def pick_best(results, expect_len=None):
     if not pool:
         return (results[0][1] if results else "").strip()
 
+    def is_subseq(short, long):
+        """short 是否为 long 的子序列(允许跳过字符)."""
+        it = iter(long)
+        return all(c in it for c in short)
+
+    # ---- 高阶路径: 指定期望长度时, 用排他性子序列支持 + 滑动窗口 ----
+    if expect_len is not None:
+        L = expect_len
+
+        # 收集 L 长候选(直接投票) 和 长输出滑动窗口子串
+        direct_votes = Counter()  # 等长候选的直接票
+        for label, text in pool:
+            n = len(text)
+            if n == L:
+                # "逐字符" 降权(已知噪声大)
+                w = 0.5 if "逐字符" in label else 1.0
+                direct_votes[text] += w
+            elif n > L:
+                for i in range(n - L + 1):
+                    sub = text[i:i + L]
+                    edge_trim = min(i, n - L - i)
+                    w = 0.8 if edge_trim == 0 else 0.4
+                    direct_votes[sub] += w
+
+        if direct_votes:
+            # 唯一短结果集合(去重)
+            short_unique = list(set(
+                t for _, t in pool if 2 <= len(t) < L))
+
+            # 对每个 L 长候选, 计算排他性子序列支持
+            support_votes = Counter()
+            for st in short_unique:
+                matched = [c for c in direct_votes if is_subseq(st, c)]
+                if len(matched) == 1:
+                    # 排他支持: 短结果只能被一个候选包含 → 强证据
+                    support_votes[matched[0]] += 1.5
+                elif len(matched) > 1:
+                    # 模糊支持: 短结果可被多个候选包含 → 弱证据
+                    for c in matched:
+                        support_votes[c] += 0.3
+
+            # 合并: 直接票 + 子序列支持
+            final_votes = Counter()
+            for text in direct_votes:
+                final_votes[text] += direct_votes[text]
+            for text in support_votes:
+                final_votes[text] += support_votes[text]
+
+            if final_votes:
+                best_text = final_votes.most_common(1)[0][0]
+                if final_votes[best_text] >= 1.0:
+                    return best_text
+
+    # ---- 常规择优(无 expect_len 或高阶路径无结果时) ----
     if expect_len is not None:
         matched = [(l, t) for l, t in pool if len(t) == expect_len]
         if matched:

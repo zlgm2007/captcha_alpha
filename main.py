@@ -74,6 +74,12 @@ def main():
         variants.append(("纯gamma", preprocess(args.image, upscale=upscale,
                                                gamma=args.gamma, denoise=0,
                                                bg_whiten=0)))
+        # 深增强: 高gamma(3.7)+高放大(4)+适度去噪(3)+不提白
+        # 针对低对比度/细笔画字符(如 x 被漏读或误读为 i)的验证码
+        # 高gamma大幅提亮暗笔画, 高放大增加细节分辨率, 不提白避免抹掉淡笔画
+        variants.append(("深增强", preprocess(args.image, upscale=4,
+                                               gamma=3.7, denoise=3,
+                                               bg_whiten=0)))
         # 原图: 不经任何预处理
         variants.append(("原图", None))
         # 噪点修复: 检测并抹白盖在字符上的实心矩形噪点(抖音干扰), gamma二值化
@@ -131,7 +137,10 @@ def main():
         print("[错误] 未能识别出任何结果")
         return 1
 
-    best = pick_best(candidates, expect_len=args.length)
+    # 择优: 用 --length 或自动推断的最长长度作为期望长度
+    # 自动推断长度让高阶择优(排他性子序列支持)也能在未指定 --length 时生效
+    expect_len = args.length if args.length is not None else hint
+    best = pick_best(candidates, expect_len=expect_len)
 
     # 检测到噪点块时: 噪点修复结果代表"去噪后"读数, 若与最优结果等长且为有效
     # 字母数字串, 优先采用(修复后长度变化通常说明误抹了字符笔画, 则不采用).

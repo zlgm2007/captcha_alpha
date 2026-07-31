@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2026 周亮 Ryo Zhou
+# Licensed under the MIT License. See LICENSE for details.
 """验证码标注工具(tkinter): OCR 预填 + 人工校正.
 
 读取 raw/ 目录下的验证码图片, 逐张显示并预填当前 OCR 结果,

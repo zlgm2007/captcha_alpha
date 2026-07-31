@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2026 周亮 Ryo Zhou
+# Licensed under the MIT License. See LICENSE for details.
 """验证码图片预处理模块.
 
 提供 preprocess() 函数对验证码图片做增强, 使 ddddocr 识别更准确.

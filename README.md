@@ -221,6 +221,21 @@ python main.py images/test.png --model models/<模型名>.onnx
 
 ---
 
+## License
+
+本项目基于 [MIT License](LICENSE) 开源，可自由使用、修改和分发。
+
+### 上游致谢
+
+本项目依赖以下开源项目，在此表示感谢：
+
+| 项目 | 协议 | 说明 |
+|------|------|------|
+| [ddddocr](https://github.com/sml2h3/ddddocr) | MIT | 验证码 OCR 识别引擎 |
+| [dddd_trainer](https://github.com/sml2h3/dddd_trainer) | Apache 2.0 | CRNN 训练框架（`captcha_trainer/` 子目录） |
+
+> `captcha_trainer/` 目录保留上游 dddd_trainer 的 Apache 2.0 协议（见该目录下的 `LICENSE`），其余代码采用 MIT 协议。
+
 ## 参考
 
 - ddddocr: https://github.com/sml2h3/ddddocr

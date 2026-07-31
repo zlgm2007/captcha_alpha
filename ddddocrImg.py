@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2026 周亮 Ryo Zhou
+# Licensed under the MIT License. See LICENSE for details.
 """ddddocr 验证码识别模块.
 
 提供两条识别路径:

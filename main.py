@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2026 周亮 Ryo Zhou
+# Licensed under the MIT License. See LICENSE for details.
 """验证码识别主程序: 预处理(preImg) + ddddocr识别(ddddocrImg).
 
 流程:

@@ -63,11 +63,11 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    subgraph 输入
+    subgraph 输入["输入"]
         IMG[验证码图片]
     end
 
-    subgraph 预处理层
+    subgraph 预处理层["预处理层"]
         V1[增强变体<br/>denoise=5 gamma=1.3<br/>bg_whiten=235 upscale=2]
         V2[纯gamma变体<br/>denoise=0 gamma=1.3<br/>bg_whiten=0 upscale=2]
         V3[深增强变体 ★新增<br/>denoise=3 gamma=3.7<br/>bg_whiten=0 upscale=4]
@@ -75,13 +75,13 @@ flowchart LR
         V5[噪点修复变体<br/>矩形噪点抹白]
     end
 
-    subgraph 识别层
+    subgraph 识别层["识别层"]
         OCR_B[beta 模型]
         OCR_S[std 模型]
         OCR_C[逐字符分割识别]
     end
 
-    subgraph 择优层 ★改进
+    subgraph 择优层["择优层 ★改进"]
         P1[滑动窗口子串投票]
         P2[排他性子序列支持]
         P3[逐字符降权]

@@ -187,6 +187,62 @@ def repair_noise_blocks(src, recognize_fn=None):
     return repaired
 
 
+def adaptive_threshold(src, block=11, c=2, upscale=2, denoise=3, gamma=0.0):
+    """自适应阈值预处理: 对局部对比度不均的验证码(如 9/c/g 混淆)效果好.
+
+    流程: 去噪 -> gamma -> 自适应高斯阈值 -> 去小噪点 -> 放大.
+    返回灰度图(背景白, 字符黑, 与 ddddocr 输入风格一致).
+    """
+    img = read_image(src)
+    if denoise > 0:
+        img = cv2.fastNlMeansDenoisingColored(img, None, denoise, denoise, 7, 21)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    if gamma:
+        lut = np.array(
+            [min(255, int(255 * ((i / 255) ** gamma))) for i in range(256)],
+            np.uint8)
+        gray = cv2.LUT(gray, lut)
+
+    # 自适应阈值: 背景白(255), 字符黑(0)
+    th = cv2.adaptiveThreshold(
+        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV, block, c)
+
+    # 去除极小的孤立噪点
+    num, labels, stats, _ = cv2.connectedComponentsWithStats(th)
+    for i in range(1, num):
+        if stats[i, cv2.CC_STAT_AREA] < 8:
+            th[labels == i] = 0
+
+    # 转回白底黑字灰度图
+    gray = 255 - th
+
+    if upscale > 1:
+        gray = cv2.resize(gray, None, fx=upscale, fy=upscale,
+                          interpolation=cv2.INTER_CUBIC)
+    return gray
+
+
+def clahe_enhance(src, clip=2.0, grid=(8, 8), upscale=2, denoise=3):
+    """CLAHE 对比度受限自适应直方图均衡.
+
+    对局部过淡/过暗的字符有增强作用, 与 gamma 互补.
+    """
+    img = read_image(src)
+    if denoise > 0:
+        img = cv2.fastNlMeansDenoisingColored(img, None, denoise, denoise, 7, 21)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    clahe = cv2.createCLAHE(clipLimit=clip, tileGridSize=grid)
+    gray = clahe.apply(gray)
+
+    if upscale > 1:
+        gray = cv2.resize(gray, None, fx=upscale, fy=upscale,
+                          interpolation=cv2.INTER_CUBIC)
+    return gray
+
+
 def preprocess(src, dst=None, binary=False, upscale=2, denoise=5,
                bg_whiten=235, gamma=0.0, min_area=15, repair_noise=False):
     """预处理验证码图片, 返回处理后的灰度图(np.uint8).

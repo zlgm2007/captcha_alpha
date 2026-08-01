@@ -4,9 +4,11 @@
 """captcha_alpha 自动化测试套件.
 
 覆盖核心识别能力 + API 层接口:
-  - test.png  -> xf4y4  (困难样例: 密集竖线噪声 + x/f 粘连 + x 笔画淡)
-  - test2.jpg -> kdqu   (简单样例: 笔画清晰、无粘连)
-  - test3.png -> phhxx  (常规样例)
+  - test.png    -> xf4y4  (困难样例: 密集竖线噪声 + x/f 粘连 + x 笔画淡)
+  - test2.jpg   -> kdqu   (简单样例: 笔画清晰、无粘连)
+  - test3.png   -> phhxx  (常规样例)
+  - bc_0002.png -> 9tns3  (抖音粘连: 9/t 粘连, 自适应阈值变体可识别)
+  - bc_0001.png -> ctyx   (已知困难: y/x 粘连, 通用模型极限, 需训练专用模型)
 
 测试维度:
   1. API 层: CaptchaRecognizer.recognize() 默认参数 / 指定长度 / 多输入类型
@@ -15,12 +17,14 @@
   4. 错误处理: 无效图片 / 不存在路径 / 不存在模型
   5. CLI 调用: python main.py <image> → stdout 含正确验证码
   6. 择优逻辑: pick_best 单元测试
+  7. 已知困难样例: bc_0001.png 不崩溃 / 前缀正确 / 变体存在
 
 运行:
     pytest tests/ -v
     pytest tests/ -v -k "test_png"           # 只跑困难样例
     pytest tests/ -v -k "TestAPI"             # 只跑 API 层
     pytest tests/ -v -k "TestPickBest"        # 只跑单元测试(秒完)
+    pytest tests/ -v -k "KnownDifficult"      # 只跑已知困难样例
     python tests/test_captcha.py              # 直接运行
 """
 import os
@@ -46,6 +50,7 @@ TEST_CASES = [
     ("test.png", "xf4y4", "困难: 密集竖线噪声 + x/f 粘连 + x 笔画淡"),
     ("test2.jpg", "kdqu", "简单: 笔画清晰、无粘连"),
     ("test3.png", "phhxx", "常规: 标准验证码"),
+    ("bc_0002.png", "9tns3", "抖音粘连: 9/t 粘连, 自适应阈值变体可识别"),
 ]
 
 
@@ -248,6 +253,57 @@ class TestDifficultCase:
         result = recognizer.recognize(image_path("test.png"))
         assert "xf4y4" in result.candidate_texts, (
             f"xf4y4 未出现在候选中: {result.candidate_texts}"
+        )
+
+
+# ================================================================
+#  已知困难样例（通用模型能力极限）
+# ================================================================
+
+class TestKnownDifficultCase:
+    """bc_0001.png (ctyx) —— 通用 ddddocr 模型能力极限.
+
+    y 与 x 严重粘连，502 种预处理参数下模型始终输出 3 字符 (ctx)，
+    y 字符在图像层面不可分离。需训练专用 CRNN 模型才能解决。
+
+    本测试类不断言正确结果，仅验证:
+      1. 识别不崩溃、返回合法结构
+      2. 输出长度合理（3~4 字符）
+      3. 前两个字符为 ct（与正确答案 ctyx 前缀一致）
+      4. 自适应阈值变体存在于候选中（为未来训练模型后的改进留接口）
+    """
+
+    def test_recognize_does_not_crash(self, recognizer):
+        """bc_0001.png 识别不应崩溃."""
+        result = recognizer.recognize(image_path("bc_0001.png"))
+        assert isinstance(result.text, str)
+        assert len(result.text) >= 1
+
+    def test_output_length_reasonable(self, recognizer):
+        """输出长度应在 3~4 之间（y 被吞掉是已知问题）."""
+        result = recognizer.recognize(image_path("bc_0001.png"))
+        assert 3 <= len(result.text) <= 4, (
+            f"输出长度异常: {len(result.text)} 字符: {result.text}"
+        )
+
+    def test_prefix_correct(self, recognizer):
+        """前两个字符应为 ct（与正确答案 ctyx 一致）."""
+        result = recognizer.recognize(image_path("bc_0001.png"))
+        assert result.text[:2] == "ct", (
+            f"前缀不匹配: 期望 'ct', 实际 '{result.text[:2]}' (完整: {result.text})"
+        )
+
+    def test_candidates_nonempty(self, recognizer):
+        """候选列表不应为空."""
+        result = recognizer.recognize(image_path("bc_0001.png"))
+        assert len(result.candidates) >= 2
+
+    def test_adaptive_threshold_variant_exists(self, recognizer):
+        """自适应阈值变体应出现在候选中（为未来改进留接口）."""
+        result = recognizer.recognize(image_path("bc_0001.png"))
+        labels = [c.label for c in result.candidates]
+        assert any("自适应" in label or "CLAHE" in label for label in labels), (
+            f"自适应阈值/CLAHE 变体未出现在候选中\n  labels: {labels}"
         )
 
 

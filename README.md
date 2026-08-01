@@ -33,12 +33,14 @@ captcha_alpha/                            # 验证码识别与训练工具（仓
 │   ├── setup_mcp.py                    # 一键安装：注册 MCP + 导入技能包
 │   └── captcha-recognition/            # 技能包（SKILL.md + API 参考）
 ├── tests/
-│   └── test_captcha.py                 # pytest 测试套件（46 项，覆盖识别 + API + 择优逻辑）
+│   └── test_captcha.py                 # pytest 测试套件（60 项，覆盖识别 + API + 择优逻辑 + 已知困难样例）
 ├── images/
 │   ├── test.png                        # 困难测试样例（正确答案 xf4y4，已修复）
 │   ├── test2.jpg                       # 简单测试样例（正确答案 kdqu，可稳定识别）
 │   ├── test3.png                       # 测试样例（输出 phhxx）
-│   └── bc_0001-3.png                   # 真实抖音验证码样本（验证预处理不误伤干净图）
+│   ├── bc_0001.png                     # 抖音验证码（正确答案 ctyx，y/x 粘连，需训练专用模型）
+│   ├── bc_0002.png                     # 抖音验证码（正确答案 9tns3，自适应阈值变体已解决 ✅）
+│   └── bc_0003.png                     # 抖音验证码样本（验证预处理不误伤干净图）
 ├── captcha_data/
 │   ├── raw/                            # 待标注图片目录
 │   └── labeled/                        # 标注输出目录（label_hash.png）
@@ -181,7 +183,25 @@ python src/ddddocrImg.py images/test.png --per-char --length 5
 
 > 完整技术方案（含根因诊断、参数搜索过程、投票权重计算、6 张 Mermaid 流程图）详见 **[doc/captcha-recognition-optimization.md](doc/captcha-recognition-optimization.md)**。
 
-### 5. API 层调用（作为 SDK 使用）
+### 5. 抖音验证码增强（bc_0001 / bc_0002）
+
+在 test.png / test2.jpg / test3.png 三个样例全部解决的基础上，进一步增强了两个抖音验证码样例的识别能力：
+
+| 图片 | 正确答案 | 难度 | 状态 | 解决方案 |
+| --- | --- | --- | --- | --- |
+| `bc_0002.png` | `9tns3` | 9/t 粘连、局部对比度不均 | ✅ 已解决 | 自适应阈值变体 + 按变体聚合投票 |
+| `bc_0001.png` | `ctyx` | y/x 严重粘连、笔画不可分离 | ❌ 需训练专用模型 | 通用模型能力极限，502 种参数均输出 ctx |
+
+**bc_0002.png 解决方案**（两处改动）：
+
+1. **新增自适应阈值预处理变体**（`src/preImg.py` 的 `adaptive_threshold()`）：`cv2.adaptiveThreshold` + Gaussian C，对局部对比度不均的验证码（如 9/c/g 混淆）有效。新增 3 组参数 + 1 组 CLAHE 变体参与投票。
+2. **按变体聚合投票**（`src/ddddocrImg.py` 的 `aggregate_by_variant()`）：同一预处理变体的 beta/std 结果一致 → 1.5 票（强证据）；不一致 → 各 0.5 票（弱证据）。3 个自适应阈值变体一致输出 `9tns3`（3 × 1.5 = 4.5 票），胜过多数传统变体输出的 `ctns3`（各 0.5 票）。
+
+**bc_0001.png 当前限制**：
+
+`y` 与 `x` 在图像层面严重粘连，502 种预处理参数下 ddddocr 始终输出 3 字符 `ctx`，`y` 完全不可见。尝试了形态学腐蚀、分水岭分割、强制等宽分割、霍夫去线——均无效。**结论：当前通用模型能力已达极限，需用 `captcha_trainer/` 训练专用 CRNN 模型才能解决。**
+
+### 6. API 层调用（作为 SDK 使用）
 
 核心识别逻辑封装在 `src/api.py` 中，可直接作为 Python 库调用，不必走 CLI：
 
@@ -231,7 +251,7 @@ result = recognize("images/test.png")
 | `confidence` | `float`           | 置信度（0~1），最终结果在候选中的得票占比 |
 | `length`     | `int`             | 最终结果字符长度                          |
 
-### 6. 接入 AI Agent（WorkBuddy / Claude）
+### 7. 接入 AI Agent（WorkBuddy / Claude）
 
 项目通过 MCP Server（`mcp/mcp_server.py`）将验证码识别暴露为 AI Agent 可直接调用的工具（`recognize_captcha` / `recognize_captcha_base64` / `recognize_captcha_batch`），并附 WorkBuddy 技能包。一键安装、手动注册、工具说明与调用流程见 **[doc/ai-agent-integration.md](doc/ai-agent-integration.md)**。
 
@@ -305,7 +325,7 @@ python src/main.py images/test.png --model models/<模型名>.onnx
 # 安装测试依赖
 pip install pytest
 
-# 运行全部测试（25 项，约 7 秒）
+# 运行全部测试（60 项，约 22 秒）
 pytest tests/ -v
 
 # 只跑困难样例
@@ -313,17 +333,24 @@ pytest tests/ -v -k "test_png"
 
 # 只跑择优逻辑单元测试（秒完，无需加载模型）
 pytest tests/ -v -k "TestPickBest"
+
+# 只跑已知困难样例
+pytest tests/ -v -k "KnownDifficult"
 ```
 
 测试覆盖：
 
 
-| 测试类                | 覆盖内容                                                                                                    |
-| --------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `TestCoreRecognition` | 三个样例（test.png→xf4y4、test2.jpg→kdqu、test3.png→phhxx）的默认参数 / 指定长度 / 候选非空 / 结果合法性 |
-| `TestDifficultCase`   | 困难样例专项：x 不漏读、x 不误读为 i、深增强变体存在、正确答案在候选中                                      |
-| `TestCLI`             | 命令行调用 stdout 含正确结果、不存在的图片退出码 1                                                          |
-| `TestPickBest`        | 择优逻辑单元测试：多数投票、排他性子序列支持、长度偏好、空候选、滑动窗口                                    |
+| 测试类 | 覆盖内容 |
+| --- | --- |
+| `TestAPI` | 四个样例（test.png→xf4y4、test2.jpg→kdqu、test3.png→phhxx、bc_0002.png→9tns3）的默认参数 / 指定长度 / bytes / ndarray 输入 |
+| `TestResultStructure` | CaptchaResult 字段完整性 / 候选结构 / __str__ / candidate_texts 属性 |
+| `TestBatchRecognition` | 批量识别顺序一致 / 指定长度 |
+| `TestErrorHandling` | 无效图片 / 不存在路径 / 不存在模型 |
+| `TestDifficultCase` | 困难样例专项：x 不漏读、x 不误读为 i、深增强变体存在、正确答案在候选中 |
+| `TestKnownDifficultCase` | bc_0001.png 已知困难：不崩溃 / 前缀正确 / 输出长度合理 / 自适应阈值变体存在 |
+| `TestCLI` | 命令行调用 stdout 含正确结果、不存在的图片退出码 1 |
+| `TestPickBest` | 择优逻辑单元测试：多数投票、排他性子序列支持、长度偏好、空候选、滑动窗口 |
 
 ---
 

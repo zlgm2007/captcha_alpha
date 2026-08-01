@@ -34,6 +34,10 @@ captcha_alpha/                            # 验证码识别与训练工具（仓
 │   └── captcha-recognition/            # 技能包（SKILL.md + API 参考）
 ├── tests/
 │   └── test_captcha.py                 # pytest 测试套件（60 项，覆盖识别 + API + 择优逻辑 + 已知困难样例）
+├── experiments/                        # 分析实验脚本（bc_0001 粘连诊断 / 骨架化 / 多 OCR 引擎对比）
+│   ├── analyze_fusion.py              # 垂直投影 / 低谷分析 / 预处理对比
+│   ├── experiment_bc0001.py           # 形态学腐蚀断连 / 颈部切分 / 多尺度识别
+│   └── experiment_skeleton.py         # Zhang-Suen 骨架化 / 分叉点 / 连通域分析
 ├── images/
 │   ├── test.png                        # 困难测试样例（正确答案 xf4y4，已修复）
 │   ├── test2.jpg                       # 简单测试样例（正确答案 kdqu，可稳定识别）

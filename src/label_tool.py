@@ -13,7 +13,7 @@
   Backspace  返回上一张
   Esc        退出
 
-用法: python label_tool.py --raw <目录> --labeled <目录> [--length 5]
+用法: python src/label_tool.py --raw <目录> --labeled <目录> [--length 5]
 """
 import argparse
 import hashlib

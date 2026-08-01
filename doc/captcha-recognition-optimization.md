@@ -137,7 +137,7 @@ flowchart TD
 
 ### 5.3 代码实现
 
-在 `main.py` 中新增深增强变体：
+在 `src/main.py` 中新增深增强变体：
 
 ```python
 # 深增强: 高gamma(3.7)+高放大(4)+适度去噪(3)+不提白
@@ -351,13 +351,13 @@ flowchart TD
 
 ```bash
 # 核心验证: test.png 应输出 xf4y4
-python main.py images/test.png --length 5
+python src/main.py images/test.png --length 5
 
 # 回归验证: test2.jpg 应输出 kdqu
-python main.py images/test2.jpg
+python src/main.py images/test2.jpg
 
 # 不传 length 也应正确
-python main.py images/test.png
+python src/main.py images/test.png
 ```
 
 ---
@@ -366,8 +366,8 @@ python main.py images/test.png
 
 | 文件 | 修改内容 |
 |------|----------|
-| `main.py` | 新增"深增强"预处理变体（gamma=3.7, upscale=4, denoise=3, bg_whiten=0）；自动推断长度传给 `pick_best` |
-| `ddddocrImg.py` | 重写 `pick_best`：新增滑动窗口子串投票、排他性子序列支持、逐字符降权逻辑 |
+| `src/main.py` | 新增"深增强"预处理变体（gamma=3.7, upscale=4, denoise=3, bg_whiten=0）；自动推断长度传给 `pick_best` |
+| `src/ddddocrImg.py` | 重写 `pick_best`：新增滑动窗口子串投票、排他性子序列支持、逐字符降权逻辑 |
 
 ---
 

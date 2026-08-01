@@ -2,7 +2,7 @@
 """一键安装脚本：注册 MCP Server + 导入技能包.
 
 用法:
-    python setup_mcp.py
+    python mcp/setup_mcp.py
 
 功能:
     1. 自动检测当前 Python 解释器路径和项目根目录
@@ -15,11 +15,11 @@ import os
 import shutil
 import sys
 
-PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKBUDDY_HOME = os.path.expanduser("~/.workbuddy")
 MCP_JSON = os.path.join(WORKBUDDY_HOME, "mcp.json")
 SKILLS_DIR = os.path.join(WORKBUDDY_HOME, "skills")
-SKILL_SRC = os.path.join(PROJECT_DIR, "captcha-recognition")
+SKILL_SRC = os.path.join(PROJECT_DIR, "mcp", "captcha-recognition")
 SKILL_DST = os.path.join(SKILLS_DIR, "captcha-recognition")
 
 
@@ -35,7 +35,7 @@ def register_mcp():
 
     entry = {
         "command": sys.executable,
-        "args": [os.path.join(PROJECT_DIR, "mcp_server.py")],
+        "args": [os.path.join(PROJECT_DIR, "mcp", "mcp_server.py")],
         "cwd": PROJECT_DIR,
         "disabled": False,
     }
@@ -88,7 +88,7 @@ def verify():
     step("[3/3] 验证安装")
 
     # 检查 mcp_server.py 可导入
-    mcp_server = os.path.join(PROJECT_DIR, "mcp_server.py")
+    mcp_server = os.path.join(PROJECT_DIR, "mcp", "mcp_server.py")
     if os.path.exists(mcp_server):
         print(f"  ✓ mcp_server.py 存在")
     else:
@@ -133,9 +133,9 @@ def main():
   4. 在对话中说「识别验证码 /path/to/captcha.png」即可调用
 
   命令行直接使用:
-    python main.py images/test.png      # → xf4y4
-    python main.py images/test2.jpg     # → kdqu
-    python test_captcha.py              # 运行 46 项测试
+    python src/main.py images/test.png      # → xf4y4
+    python src/main.py images/test2.jpg     # → kdqu
+    pytest tests/                           # 运行测试套件
 """)
 
 

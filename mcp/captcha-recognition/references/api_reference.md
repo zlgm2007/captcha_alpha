@@ -5,7 +5,7 @@
 - **名称**: `captcha-alpha`
 - **传输协议**: stdio
 - **Python 环境**: `/Users/zhouliang/.workbuddy/binaries/python/envs/captcha/bin/python3`
-- **入口文件**: `/Users/zhouliang/Desktop/work/github/captcha_alpha/mcp_server.py`
+- **入口文件**: `/Users/zhouliang/Desktop/work/github/captcha_alpha/mcp/mcp_server.py`
 
 ## 工具列表
 

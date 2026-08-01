@@ -7,7 +7,7 @@
 本模块仅负责命令行参数解析和格式化输出.
 
 用法:
-  python main.py [图片路径] [-o 预处理输出图] [--length N] [--binary] [--no-upscale] [--model 模型.onnx]
+  python src/main.py [图片路径] [-o 预处理输出图] [--length N] [--binary] [--no-upscale] [--model 模型.onnx]
 """
 import argparse
 import os

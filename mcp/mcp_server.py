@@ -20,10 +20,11 @@ import os
 import sys
 from typing import Optional
 
-# 确保项目根目录在 sys.path 中(从任意目录启动都能找到 api.py)
-_PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
-if _PROJECT_DIR not in sys.path:
-    sys.path.insert(0, _PROJECT_DIR)
+# 确保主工程目录 src/ 在 sys.path 中(从任意目录启动都能找到 api.py)
+_SRC_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
 
 from mcp.server import MCPServer
 from api import CaptchaRecognizer, CaptchaError

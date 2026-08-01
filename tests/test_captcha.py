@@ -17,11 +17,11 @@
   6. 择优逻辑: pick_best 单元测试
 
 运行:
-    pytest test_captcha.py -v
-    pytest test_captcha.py -v -k "test_png"           # 只跑困难样例
-    pytest test_captcha.py -v -k "TestAPI"             # 只跑 API 层
-    pytest test_captcha.py -v -k "TestPickBest"        # 只跑单元测试(秒完)
-    python test_captcha.py                             # 直接运行
+    pytest tests/ -v
+    pytest tests/ -v -k "test_png"           # 只跑困难样例
+    pytest tests/ -v -k "TestAPI"             # 只跑 API 层
+    pytest tests/ -v -k "TestPickBest"        # 只跑单元测试(秒完)
+    python tests/test_captcha.py              # 直接运行
 """
 import os
 import subprocess
@@ -30,13 +30,15 @@ import sys
 import numpy as np
 import pytest
 
-# 项目根目录 = 本文件所在目录
-ROOT = os.path.dirname(os.path.abspath(__file__))
+# 项目根目录 = 本文件所在目录的上一级 (tests/ 的父目录)
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC = os.path.join(ROOT, "src")
 IMAGES = os.path.join(ROOT, "images")
+MAIN = os.path.join(SRC, "main.py")
 
-# 确保项目根目录在 sys.path 中
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
+# 确保主工程目录 src/ 在 sys.path 中
+if SRC not in sys.path:
+    sys.path.insert(0, SRC)
 
 # ---- 测试样例定义 ----
 # (文件名, 期望结果, 难度描述)
@@ -254,14 +256,14 @@ class TestDifficultCase:
 # ================================================================
 
 class TestCLI:
-    """测试命令行调用 python main.py <image>."""
+    """测试命令行调用 python src/main.py <image>."""
 
     @pytest.mark.parametrize("filename,expected,desc", TEST_CASES)
     def test_cli_output(self, filename, expected, desc):
         """CLI stdout 应包含正确的验证码结果."""
         img = image_path(filename)
         result = subprocess.run(
-            [sys.executable, os.path.join(ROOT, "main.py"), img],
+            [sys.executable, MAIN, img],
             capture_output=True, text=True, cwd=ROOT, timeout=60
         )
         assert result.returncode == 0, (
@@ -276,7 +278,7 @@ class TestCLI:
     def test_cli_shows_confidence(self):
         """CLI 应输出置信度."""
         result = subprocess.run(
-            [sys.executable, os.path.join(ROOT, "main.py"), image_path("test2.jpg")],
+            [sys.executable, MAIN, image_path("test2.jpg")],
             capture_output=True, text=True, cwd=ROOT, timeout=60
         )
         assert "置信度" in result.stdout
@@ -284,7 +286,7 @@ class TestCLI:
     def test_cli_nonexistent_image(self):
         """传入不存在的图片 → 退出码 1."""
         result = subprocess.run(
-            [sys.executable, os.path.join(ROOT, "main.py"),
+            [sys.executable, MAIN,
              "/nonexistent/captcha.png"],
             capture_output=True, text=True, cwd=ROOT, timeout=30
         )

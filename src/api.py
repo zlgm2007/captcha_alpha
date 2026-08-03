@@ -53,13 +53,19 @@ import numpy as np
 from ddddocrImg import (
     _binarize,
     pick_best,
-    recognize,
+    recognize as ddddocr_recognize,
     recognize_multi,
     recognize_per_char,
     to_bytes,
     to_gray,
 )
-from preImg import detect_noise_blocks, preprocess, repair_noise_blocks
+from preImg import (
+    adaptive_threshold,
+    clahe_enhance,
+    detect_noise_blocks,
+    preprocess,
+    repair_noise_blocks,
+)
 
 # 类型别名: 接受的图片输入类型
 ImageInput = Union[str, Path, bytes, bytearray, np.ndarray]
@@ -219,6 +225,17 @@ class CaptchaRecognizer:
                 # 针对低对比度/细笔画字符 (如 x 被漏读或误读为 i)
                 variants.append(("深增强", preprocess(
                     image, upscale=4, gamma=3.7, denoise=3, bg_whiten=0)))
+                # 自适应阈值: 对局部对比度不均、字符与背景粘连严重的验证码
+                # 在 bc_0002.png 上能让模型正确识别出首字符 9
+                variants.append(("自适应阈值1", adaptive_threshold(
+                    image, block=15, c=1, upscale=2, denoise=0, gamma=1.3)))
+                variants.append(("自适应阈值2", adaptive_threshold(
+                    image, block=15, c=2, upscale=2, denoise=5, gamma=2.0)))
+                variants.append(("自适应阈值3", adaptive_threshold(
+                    image, block=11, c=1, upscale=2, denoise=3, gamma=0)))
+                # CLAHE: 局部对比度增强, 作为 gamma 互补
+                variants.append(("CLAHE", clahe_enhance(
+                    image, clip=2.0, grid=(8, 8), upscale=2, denoise=3)))
             except Exception as e:
                 raise InvalidImageError(f"图片预处理失败: {e}") from e
             # 原图: 不经任何预处理
@@ -248,20 +265,29 @@ class CaptchaRecognizer:
             for label, img in variants:
                 try:
                     src = image_bytes if img is None else img
-                    text = recognize(src, import_onnx_path=self.model_path,
-                                     charsets_path=self.charsets_path)
+                    text = ddddocr_recognize(src, import_onnx_path=self.model_path,
+                                             charsets_path=self.charsets_path)
                     if text:
                         candidates.append((f"{label}(自定义)", text))
                 except Exception:
                     pass
 
-        # ---- 4. 逐字符分割兜底 ----
+        # ---- 4. 自动推断长度 ----
         hint = length
         if hint is None:
-            lengths = [len(t) for _, t in candidates
-                       if re.fullmatch(r"[A-Za-z0-9]+", t)]
-            if lengths:
-                hint = max(lengths)
+            # 用主变体(增强/纯gamma/深增强/原图/噪点修复)推断长度, 避免辅助变体
+            # (自适应阈值/CLAHE)拉长/缩短导致整体判断错误
+            main_labels = ("增强(", "纯gamma(", "深增强(", "原图(", "噪点修复(")
+            main_lengths = [len(t) for l, t in candidates
+                            if re.fullmatch(r"[A-Za-z0-9]+", t)
+                            and any(l.startswith(p) for p in main_labels)]
+            if main_lengths:
+                hint = max(main_lengths)
+            else:
+                lengths = [len(t) for _, t in candidates
+                           if re.fullmatch(r"[A-Za-z0-9]+", t)]
+                if lengths:
+                    hint = max(lengths)
         try:
             per_char = recognize_per_char(image, length=hint, beta=True)
             if per_char:
@@ -342,7 +368,7 @@ _default_recognizer: Optional[CaptchaRecognizer] = None
 
 
 def recognize(image: ImageInput, length: Optional[int] = None,
-              model_path: str = "", **kwargs) -> CaptchaResult:
+              model_path: str = "", charsets_path: str = "", **kwargs) -> CaptchaResult:
     """快捷识别函数 (使用全局单例识别器).
 
     首次调用时创建 CaptchaRecognizer 并缓存, 后续调用复用.
@@ -352,6 +378,7 @@ def recognize(image: ImageInput, length: Optional[int] = None,
             image:      图片输入 (路径 / bytes / ndarray)
             length:     期望验证码长度
             model_path: 自定义模型路径 (仅首次调用生效)
+            charsets_path: 自定义模型字符集 json (仅首次调用生效)
             **kwargs:   传递给 CaptchaRecognizer.recognize() 的参数
 
     Returns:
@@ -359,5 +386,6 @@ def recognize(image: ImageInput, length: Optional[int] = None,
     """
     global _default_recognizer
     if _default_recognizer is None or model_path:
-        _default_recognizer = CaptchaRecognizer(model_path=model_path)
+        _default_recognizer = CaptchaRecognizer(model_path=model_path,
+                                                charsets_path=charsets_path)
     return _default_recognizer.recognize(image, length=length, **kwargs)

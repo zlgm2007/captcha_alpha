@@ -256,8 +256,8 @@ def pick_best(results, expect_len=None):
     from collections import Counter
     pool = []
     for label, text in results:
-        text = (text or "").strip()
-        if not re.fullmatch(r"[A-Za-z0-9]+", text):
+        text = (text or "").strip().lower()
+        if not re.fullmatch(r"[a-z0-9]+", text):
             continue
         pool.append((label, text))
     if not pool:
@@ -268,43 +268,89 @@ def pick_best(results, expect_len=None):
         it = iter(long)
         return all(c in it for c in short)
 
+    def variant_prefix(label):
+        """提取变体前缀, 如 '增强(beta)' -> '增强'."""
+        return label.split("(")[0].strip()
+
+    def aggregate_by_variant(pool_items):
+        """按变体前缀聚合 beta/std 输出.
+
+        同一变体下多个模型结果一致时, 该变体更可信(权重 1.5);
+        不一致时, 每个结果权重 0.5(视为较弱证据).
+        逐字符结果单独处理, 权重 0.5.
+        """
+        from collections import defaultdict
+        groups = defaultdict(list)
+        for label, text in pool_items:
+            groups[variant_prefix(label)].append((label, text))
+
+        votes = Counter()
+        for prefix, items in groups.items():
+            if prefix == "逐字符":
+                for _, text in items:
+                    votes[text] += 0.5
+                continue
+
+            texts = [t for _, t in items]
+            cnt = Counter(texts)
+            if len(cnt) == 1:
+                # 所有模型一致: 强证据
+                votes[texts[0]] += 1.5
+            else:
+                # 模型不一致: 各自较弱证据
+                for _, text in items:
+                    votes[text] += 0.5
+        return votes
+
     # ---- 高阶路径: 指定期望长度时, 用排他性子序列支持 + 滑动窗口 ----
     if expect_len is not None:
         L = expect_len
 
-        # 收集 L 长候选(直接投票) 和 长输出滑动窗口子串
-        direct_votes = Counter()  # 等长候选的直接票
+        # 1. 直接投票: 按变体前缀聚合, 同一变体一致则权重更高
+        direct_votes = Counter()
+        # 等长候选
+        equal_pool = [(l, t) for l, t in pool if len(t) == L]
+        direct_votes.update(aggregate_by_variant(equal_pool))
+
+        # 长输出滑动窗口子串(边缘裁剪越少权重越高)
+        long_pool = []
         for label, text in pool:
             n = len(text)
-            if n == L:
-                # "逐字符" 降权(已知噪声大)
-                w = 0.5 if "逐字符" in label else 1.0
-                direct_votes[text] += w
-            elif n > L:
+            if n > L:
                 for i in range(n - L + 1):
                     sub = text[i:i + L]
                     edge_trim = min(i, n - L - i)
                     w = 0.8 if edge_trim == 0 else 0.4
-                    direct_votes[sub] += w
+                    long_pool.append((label, sub, w))
+        # 滑动窗口子串仍按变体聚合, 但权重乘上边缘系数
+        from collections import defaultdict
+        sw_groups = defaultdict(list)
+        for label, sub, w in long_pool:
+            sw_groups[variant_prefix(label)].append((label, sub, w))
+        for prefix, items in sw_groups.items():
+            sub_weights = Counter()
+            for _, sub, w in items:
+                sub_weights[sub] += w
+            # 同一变体多个子串取最佳, 再聚合
+            for sub, total_w in sub_weights.items():
+                # 同一变体内部对同一个子串有共识时权重不变, 不同子串分散
+                direct_votes[sub] += min(total_w, 0.8)
 
         if direct_votes:
-            # 唯一短结果集合(去重)
+            # 2. 排他性子序列支持
             short_unique = list(set(
                 t for _, t in pool if 2 <= len(t) < L))
 
-            # 对每个 L 长候选, 计算排他性子序列支持
             support_votes = Counter()
             for st in short_unique:
                 matched = [c for c in direct_votes if is_subseq(st, c)]
                 if len(matched) == 1:
-                    # 排他支持: 短结果只能被一个候选包含 → 强证据
                     support_votes[matched[0]] += 1.5
                 elif len(matched) > 1:
-                    # 模糊支持: 短结果可被多个候选包含 → 弱证据
                     for c in matched:
                         support_votes[c] += 0.3
 
-            # 合并: 直接票 + 子序列支持
+            # 合并
             final_votes = Counter()
             for text in direct_votes:
                 final_votes[text] += direct_votes[text]
@@ -324,13 +370,12 @@ def pick_best(results, expect_len=None):
         else:
             pool = sorted(pool, key=lambda x: abs(len(x[1]) - expect_len))[:3]
 
-    votes = Counter(t for _, t in pool)
+    votes = aggregate_by_variant(pool)
 
     def rank(item):
         label, text = item
         return (votes[text],          # 多条结果一致优先
-                len(text),            # 同票数偏好更长(补漏字)
-                1 if text == text.lower() else 0)  # 小写风格
+                len(text))            # 同票数偏好更长(补漏字)
 
     pool.sort(key=rank, reverse=True)
     return pool[0][1]

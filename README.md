@@ -63,6 +63,7 @@ captcha_alpha/                            # 验证码识别与训练工具（仓
 └── doc/
     ├── captcha-recognition-optimization.md  # 困难样例优化方案（根因诊断/参数扫描/投票）
     ├── ai-agent-integration.md              # AI Agent 接入指南（MCP Server / WorkBuddy 技能）
+    ├── apply-trained-model.md               # 应用专用训练模型指南（--model / CaptchaRecognizer 用法）
     └── images/验证码识别解决方案流程.png       # 方案流程图
 ```
 
@@ -311,13 +312,15 @@ python app.py train douyin_captcha                            # CPU 训练
 
 ### 4. 使用训练好的模型
 
-把 `*.onnx` 与 `charsets.json` 拷到 `tools/models/`，然后：
+把 `*.onnx` 与 `charsets.json` 拷到 `models/`，然后：
 
 ```bash
 python src/main.py images/test.png --model models/<模型名>.onnx
 ```
 
 `--model` 模式下会同时展示通用模型与自定义模型的识别结果并择优。不传 `--model` 时行为不变，仍使用内置 ddddocr。
+
+> **应用专用模型的完整用法（CLI 参数 / Python API `CaptchaRecognizer` / 注意事项与排查）详见 [doc/apply-trained-model.md](doc/apply-trained-model.md)**。
 
 ---
 

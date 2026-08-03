@@ -53,7 +53,7 @@ import numpy as np
 from ddddocrImg import (
     _binarize,
     pick_best,
-    recognize,
+    recognize as ddddocr_recognize,
     recognize_multi,
     recognize_per_char,
     to_bytes,
@@ -265,8 +265,8 @@ class CaptchaRecognizer:
             for label, img in variants:
                 try:
                     src = image_bytes if img is None else img
-                    text = recognize(src, import_onnx_path=self.model_path,
-                                     charsets_path=self.charsets_path)
+                    text = ddddocr_recognize(src, import_onnx_path=self.model_path,
+                                             charsets_path=self.charsets_path)
                     if text:
                         candidates.append((f"{label}(自定义)", text))
                 except Exception:
@@ -368,7 +368,7 @@ _default_recognizer: Optional[CaptchaRecognizer] = None
 
 
 def recognize(image: ImageInput, length: Optional[int] = None,
-              model_path: str = "", **kwargs) -> CaptchaResult:
+              model_path: str = "", charsets_path: str = "", **kwargs) -> CaptchaResult:
     """快捷识别函数 (使用全局单例识别器).
 
     首次调用时创建 CaptchaRecognizer 并缓存, 后续调用复用.
@@ -378,6 +378,7 @@ def recognize(image: ImageInput, length: Optional[int] = None,
             image:      图片输入 (路径 / bytes / ndarray)
             length:     期望验证码长度
             model_path: 自定义模型路径 (仅首次调用生效)
+            charsets_path: 自定义模型字符集 json (仅首次调用生效)
             **kwargs:   传递给 CaptchaRecognizer.recognize() 的参数
 
     Returns:
@@ -385,5 +386,6 @@ def recognize(image: ImageInput, length: Optional[int] = None,
     """
     global _default_recognizer
     if _default_recognizer is None or model_path:
-        _default_recognizer = CaptchaRecognizer(model_path=model_path)
+        _default_recognizer = CaptchaRecognizer(model_path=model_path,
+                                                charsets_path=charsets_path)
     return _default_recognizer.recognize(image, length=length, **kwargs)

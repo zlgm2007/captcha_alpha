@@ -1,5 +1,6 @@
 import json
 import os
+import random
 
 import torch
 
@@ -7,20 +8,22 @@ from configs import Config
 from loguru import logger
 
 import torchvision
-from PIL import Image, ImageFile
+from PIL import Image, ImageEnhance, ImageFile
 from torch.utils.data import DataLoader, Dataset, TensorDataset
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 class LoadCache(Dataset):
-    def __init__(self, cache_path: str, path: str, word: bool, image_channel: int, resize: list, charset: list):
+    def __init__(self, cache_path: str, path: str, word: bool, image_channel: int, resize: list, charset: list,
+                 augment: bool = False):
         self.cache_path = cache_path
         self.path = path
         self.word = word
         self.ImageChannel = image_channel
         self.resize = resize
         self.charset = charset
+        self.augment = augment
         self.caches = []
         logger.info("\nReading Cache File... ----> {}".format(self.cache_path))
 
@@ -60,12 +63,24 @@ class LoadCache(Dataset):
                     image = image.resize((int(image_width * (height / image_height)), height))
             else:
                 image = image.resize((width, height))
+            if self.augment:
+                image = self._augment(image)
             label = [int(self.charset.index(item)) for item in list(image_label)]
             return image, label
 
         except Exception as e:
             logger.error("\nError: {}, File: {}".format(str(e), self.caches[idx].split("\t")[0]))
             return None, None
+
+    def _augment(self, image):
+        """轻微数据增强(仅训练集): 仿射平移/旋转/缩放 + 亮度/对比度抖动, 缓解小样本过拟合."""
+        if random.random() < 0.95:
+            affine = torchvision.transforms.RandomAffine(degrees=4, translate=(0.03, 0.03), scale=(0.96, 1.04))
+            image = affine(image)
+        if random.random() < 0.95:
+            image = ImageEnhance.Brightness(image).enhance(random.uniform(0.9, 1.1))
+            image = ImageEnhance.Contrast(image).enhance(random.uniform(0.9, 1.1))
+        return image
 
 
 class GetLoader:
@@ -118,19 +133,12 @@ class GetLoader:
         logger.info("\nImage Path is {}".format(self.path))
 
         self.transform_list = []
+        # 注意: ddddocr 运行时对自定义模型只做 /255 归一化(见 core/ocr_engine.py _prepare_image),
+        # 若这里再加 Normalize(0.456,0.224) 会导致训练/推理输入分布不一致, 导出模型在运行时输出乱码.
         self.transform_list.append(torchvision.transforms.ToTensor())
-        if self.ImageChannel == 1:
-            self.transform_list.append(torchvision.transforms.Normalize(mean=[0.456],
-                                                                        std=[0.224]))
-        else:
-            if self.ImageChannel != 3:
-                logger.error("ImageChannel must be 1 or 3!")
-                exit()
-            self.transform_list.append(torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                                                        std=[0.229, 0.224, 0.225]))
         self.transform = torchvision.transforms.Compose(self.transform_list)
         train_loader = LoadCache(self.cache_train_path, self.path, self.word, self.ImageChannel, self.resize,
-                                 self.charset)
+                                 self.charset, augment=True)
         if len(train_loader) < self.batch_size:
             self.batch_size = len(train_loader)
         val_loader = LoadCache(self.cache_val_path, self.path, self.word, self.ImageChannel, self.resize, self.charset)

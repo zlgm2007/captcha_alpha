@@ -10,9 +10,10 @@
 配置: 在 ~/.workbuddy/mcp.json 中注册
 
 暴露工具:
-  - recognize_captcha:      识别单张验证码图片(路径)
+  - recognize_captcha:       识别单张验证码图片(路径, 通用内置 ddddocr)
   - recognize_captcha_base64: 识别 base64 编码的图片
   - recognize_captcha_batch:  批量识别多张图片
+  - recognize_apple_captcha:  识别苹果来源验证码(路径, 自动加载专用迁移模型)
 """
 import base64
 import json
@@ -27,21 +28,30 @@ if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 
 from mcp.server import MCPServer
-from api import CaptchaRecognizer, CaptchaError
+from api import CaptchaRecognizer, CaptchaError, APPLE_MODEL_PATH
 
 # 创建 MCP Server 实例
 mcp = MCPServer("captcha-alpha")
 
 # 全局识别器实例(模型只加载一次, 后续调用复用)
 _recognizer: Optional[CaptchaRecognizer] = None
+_apple_recognizer: Optional[CaptchaRecognizer] = None
 
 
 def _get_recognizer() -> CaptchaRecognizer:
-    """获取全局识别器(懒加载, 首次调用时初始化模型)."""
+    """获取全局通用识别器(懒加载, 首次调用时初始化模型)."""
     global _recognizer
     if _recognizer is None:
         _recognizer = CaptchaRecognizer()
     return _recognizer
+
+
+def _get_apple_recognizer() -> CaptchaRecognizer:
+    """获取全局苹果专用识别器(懒加载, 自动加载 models/apple_captcha.onnx)."""
+    global _apple_recognizer
+    if _apple_recognizer is None:
+        _apple_recognizer = CaptchaRecognizer(model_path=APPLE_MODEL_PATH)
+    return _apple_recognizer
 
 
 @mcp.tool()
@@ -58,6 +68,39 @@ def recognize_captcha(image_path: str, length: int = 0) -> str:
     """
     try:
         recognizer = _get_recognizer()
+        result = recognizer.recognize(image_path, length=length or None)
+        return json.dumps({
+            "text": result.text,
+            "confidence": result.confidence,
+            "length": result.length,
+            "candidates": [{"label": c.label, "text": c.text}
+                           for c in result.candidates],
+        }, ensure_ascii=False, indent=2)
+    except FileNotFoundError as e:
+        return json.dumps({"error": f"文件不存在: {e}"}, ensure_ascii=False)
+    except CaptchaError as e:
+        return json.dumps({"error": f"识别失败: {e}"}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": f"内部错误: {e}"}, ensure_ascii=False)
+
+
+@mcp.tool()
+def recognize_apple_captcha(image_path: str, length: int = 0) -> str:
+    """识别苹果来源验证码图片, 返回识别结果 JSON (自动加载苹果专用迁移模型).
+
+    苹果专用模型针对该类验证码训练, 识别效果优于通用模型; 对非苹果图
+    (模型置信低)会自动退回通用内置识别.
+
+    Args:
+        image_path: 图片文件绝对路径
+        length:     期望验证码长度, 0 表示自动推断
+
+    Returns:
+        JSON 字符串: {"text": "HSNR", "confidence": 0.94, "length": 4,
+                      "candidates": [{"label": "...", "text": "..."}, ...]}
+    """
+    try:
+        recognizer = _get_apple_recognizer()
         result = recognizer.recognize(image_path, length=length or None)
         return json.dumps({
             "text": result.text,

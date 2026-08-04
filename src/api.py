@@ -7,7 +7,13 @@
   - CaptchaRecognizer: 识别器类, 支持单图 / 批量识别, 模型自动缓存复用
   - CaptchaResult:     识别结果(结构体), 含最终文本 + 全部候选 + 置信度
   - Candidate:         单个候选(策略标签 + 文本)
-  - recognize():       一次性快捷函数(无需手动实例化)
+  - recognize():       通用识别快捷函数(无专用模型, 内置 ddddocr 多策略投票)
+  - recognize_apple(): 苹果验证码专用识别快捷函数(自动加载 models/apple_captcha.onnx)
+
+两个快捷入口的选用:
+  - recognize(image):     通用验证码, 不传模型, 走内置多策略投票
+  - recognize_apple(image): 苹果来源验证码, 自动加载专用迁移模型; 自定义结果经
+    gap_min>=0.08 置信门槛后优先, 非苹果图(模型不确定)自动退回内置投票
 
 支持的图片输入类型:
   - str / pathlib.Path:  文件路径
@@ -37,9 +43,14 @@
     recognizer = CaptchaRecognizer(model_path="models/custom.onnx")
     result = recognizer.recognize("images/test.png")
 
-    # 6. 快捷函数(无需实例化)
+    # 6. 快捷函数(无需实例化): 通用
     from api import recognize
     result = recognize("images/test.png")
+
+    # 7. 快捷函数: 苹果验证码专用(自动加载 models/apple_captcha.onnx)
+    from api import recognize_apple
+    result = recognize_apple("captcha_data/labeled/apple/HSNR_2026-08-03-19-28-28.png")
+    print(result.text)       # "HSNR"
 """
 import os
 import re
@@ -52,8 +63,8 @@ import numpy as np
 
 from ddddocrImg import (
     _binarize,
+    get_engine,
     pick_best,
-    recognize as ddddocr_recognize,
     recognize_multi,
     recognize_per_char,
     to_bytes,
@@ -69,6 +80,12 @@ from preImg import (
 
 # 类型别名: 接受的图片输入类型
 ImageInput = Union[str, Path, bytes, bytearray, np.ndarray]
+
+# 自定义专用模型入选的置信门槛: 逐时间步 softmax top1-top2 差距的最小值.
+# 专用模型训练类别的图 gap 普遍 >=0.08, 无关图(内置 ddddocr 已能识别) gap 低.
+# 低于该值视为「本模型不确定/非本类别图」, 不强用专用结果, 退回内置多策略投票,
+# 避免专用模型把垃圾结果强加给无关图. 阈值在 runtime 概率路径上对 63 张 val 标定.
+CUSTOM_GAP_MIN = 0.08
 
 
 # ---- 异常 ----
@@ -264,12 +281,27 @@ class CaptchaRecognizer:
         # 专用模型按训练数据格式训练(原始灰度、等比缩放至高64、/255), 只吃原图.
         # 增强/提白/放大/自适应阈值等变体是给内置 ddddocr 调的, 喂给专用模型会
         # 严重拉低识别率(实测 0/12 -> 仅原图 19/20), 故只对原始字节跑一次.
+        # 用 probability 模式一次推理同时拿文本与逐时间步概率. 自定义结果不入内置
+        # 投票池: 若混入, 其长度会污染内置长度推断、其文本会干扰内置 pick_best
+        # (实测 gated 时 test2 被自定义 KTDEQL 带偏). 仅通过置信门槛时作最终答案,
+        # 并最后拼进候选列表用于展示.
+        custom_text = None
+        custom_conf = None
+        custom_gap = None
         if self.model_path:
             try:
-                text = ddddocr_recognize(image_bytes, import_onnx_path=self.model_path,
-                                         charsets_path=self.charsets_path)
-                if text:
-                    candidates.append(("原图(自定义)", text))
+                engine = get_engine(beta=True, import_onnx_path=self.model_path,
+                                    charsets_path=self.charsets_path)
+                prob = engine.classification(image_bytes, probability=True)
+                custom_text = (prob or {}).get("text") or ""
+                probs = (prob or {}).get("probabilities")
+                if probs is not None:
+                    p = np.asarray(probs, dtype=np.float32)
+                    if p.ndim == 3:
+                        p = p[:, 0, :]
+                    sp = np.sort(p, axis=-1)
+                    custom_gap = float((sp[..., -1] - sp[..., -2]).min())
+                    custom_conf = float(p.max(axis=-1).mean())
             except Exception:
                 pass
 
@@ -301,20 +333,22 @@ class CaptchaRecognizer:
 
         # ---- 5. 择优 ----
         # 专用模型按训练集格式训练(原始灰度等比缩放), 在 hard case 上远强于内置
-        # ddddocr 多变体投票(实测 val 19/20 vs 内置近 0), 故自定义结果直接作为首选;
-        # 无自定义结果时退回多变体投票择优.
-        custom = next((t for l, t in candidates
-                       if "(自定义)" in l and re.fullmatch(r"[A-Za-z0-9]{2,}", t)),
-                      None)
-        if custom:
+        # ddddocr 多变体投票(实测 val 19/20 vs 内置近 0), 故自定义结果作为首选;
+        # 但需 CUSTOM_GAP_MIN 置信门槛把关: 低 gap 说明本模型对该图不确定/图不属于
+        # 其训练类别, 不强用专用结果, 退回内置投票, 避免覆盖原本正确的结果.
+        custom = (custom_text if (custom_text
+                  and re.fullmatch(r"[A-Za-z0-9]{2,}", custom_text)) else None)
+        use_custom = (bool(custom) and custom_gap is not None
+                      and custom_gap >= CUSTOM_GAP_MIN)
+        if use_custom:
             best = custom
         else:
             expect_len = length if length is not None else hint
             best = pick_best(candidates, expect_len=expect_len)
 
-        # 噪点修复优先逻辑: 仅对内置模型投票结果生效; 有专用模型结果时不覆盖
+        # 噪点修复优先逻辑: 仅对内置模型投票结果生效; 专用模型结果入选时不覆盖
         # (专用模型吃原图, 实测噪声块不影响其识别)
-        if noise_blocks and not custom:
+        if noise_blocks and not use_custom:
             repair_result = next(
                 (t for label, t in candidates
                  if "噪点修复" in label and re.fullmatch(r"[A-Za-z0-9]{2,}", t)),
@@ -322,24 +356,33 @@ class CaptchaRecognizer:
             if repair_result and len(repair_result) == len(best):
                 best = repair_result
 
-        # ---- 6. 置信度: 最终结果在有效候选中的得票占比 ----
-        valid_texts = [t for _, t in candidates
-                       if re.fullmatch(r"[A-Za-z0-9]+", t)]
-        if valid_texts:
-            vote_counts = Counter(valid_texts)
-            # 归一化到 0~1
-            confidence = vote_counts.get(best, 0) / len(valid_texts)
-            # 考虑子序列支持带来的额外置信度提升
-            # 如果有多个候选与 best 一致(直接匹配), 置信度更高
-            exact_matches = sum(1 for t in valid_texts if t == best)
-            if exact_matches >= 2:
-                confidence = min(1.0, confidence + 0.1 * (exact_matches - 1))
+        # ---- 6. 置信度 ----
+        if use_custom and custom_conf is not None:
+            # 专用模型入选: 用模型逐时间步 top1 概率均值
+            confidence = custom_conf
         else:
-            confidence = 0.0
+            # 内置择优: 最终结果在有效候选中的得票占比
+            valid_texts = [t for _, t in candidates
+                           if re.fullmatch(r"[A-Za-z0-9]+", t)]
+            if valid_texts:
+                vote_counts = Counter(valid_texts)
+                # 归一化到 0~1
+                confidence = vote_counts.get(best, 0) / len(valid_texts)
+                # 考虑子序列支持带来的额外置信度提升
+                # 如果有多个候选与 best 一致(直接匹配), 置信度更高
+                exact_matches = sum(1 for t in valid_texts if t == best)
+                if exact_matches >= 2:
+                    confidence = min(1.0, confidence + 0.1 * (exact_matches - 1))
+            else:
+                confidence = 0.0
 
+        # 自定义结果仅用于展示(不入投票池), 拼到候选列表末尾
+        final_candidates = list(candidates)
+        if custom:
+            final_candidates.append(("原图(自定义)", custom))
         return CaptchaResult(
             text=best,
-            candidates=[Candidate(label=l, text=t) for l, t in candidates],
+            candidates=[Candidate(label=l, text=t) for l, t in final_candidates],
             confidence=round(confidence, 4),
             length=len(best),
         )
@@ -375,15 +418,22 @@ class CaptchaRecognizer:
 
 # ---- 快捷函数 ----
 
+# 苹果专用迁移模型默认路径 (src/api.py -> 仓库根 models/apple_captcha.onnx)
+APPLE_MODEL_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "models", "apple_captcha.onnx")
+
 _default_recognizer: Optional[CaptchaRecognizer] = None
+_apple_recognizer: Optional[CaptchaRecognizer] = None
 
 
 def recognize(image: ImageInput, length: Optional[int] = None,
               model_path: str = "", charsets_path: str = "", **kwargs) -> CaptchaResult:
-    """快捷识别函数 (使用全局单例识别器).
+    """通用识别快捷函数 (使用全局单例识别器, 无专用模型, 内置 ddddocr 多策略投票).
 
     首次调用时创建 CaptchaRecognizer 并缓存, 后续调用复用.
-    如需指定自定义模型或多实例, 请直接使用 CaptchaRecognizer 类.
+    如需指定自定义模型或多实例, 请直接使用 CaptchaRecognizer 类;
+    苹果验证码专用接口见 recognize_apple().
 
     Args:
             image:      图片输入 (路径 / bytes / ndarray)
@@ -400,3 +450,29 @@ def recognize(image: ImageInput, length: Optional[int] = None,
         _default_recognizer = CaptchaRecognizer(model_path=model_path,
                                                 charsets_path=charsets_path)
     return _default_recognizer.recognize(image, length=length, **kwargs)
+
+
+def recognize_apple(image: ImageInput, length: Optional[int] = None,
+                    model_path: str = APPLE_MODEL_PATH, charsets_path: str = "",
+                    **kwargs) -> CaptchaResult:
+    """苹果验证码专用识别快捷函数 (自动加载 models/apple_captcha.onnx).
+
+    自定义模型结果经 gap_min>=0.08 置信门槛后优先(详见 CUSTOM_GAP_MIN); 对非苹果图
+    (模型不确定、gap 低)自动退回内置 ddddocr 多策略投票, 避免专用模型把垃圾结果
+    强加给无关图. 首次调用时创建苹果专用识别器并缓存, 后续复用.
+
+    Args:
+            image:      图片输入 (路径 / bytes / ndarray)
+            length:     期望验证码长度
+            model_path: 专用模型 onnx 路径 (默认 models/apple_captcha.onnx)
+            charsets_path: 模型字符集 json (默认取模型同目录 charsets.json)
+            **kwargs:   传递给 CaptchaRecognizer.recognize() 的参数
+
+    Returns:
+            CaptchaResult
+    """
+    global _apple_recognizer
+    if _apple_recognizer is None or model_path != _apple_recognizer.model_path:
+        _apple_recognizer = CaptchaRecognizer(model_path=model_path,
+                                              charsets_path=charsets_path)
+    return _apple_recognizer.recognize(image, length=length, **kwargs)

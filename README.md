@@ -254,7 +254,15 @@ recognizer = CaptchaRecognizer(model_path="models/custom.onnx")
 
 # 方式 2: 快捷函数（全局单例，适合一次性调用）
 result = recognize("images/test.png")
+
+# 方式 3: 苹果验证码专用快捷函数（自动加载 models/apple_captcha.onnx，
+#         带 gap_min 置信门槛：非苹果图自动退回内置识别）
+from api import recognize_apple
+result = recognize_apple("captcha_data/labeled/apple/HSNR_2026-08-03-19-28-28.png")
+print(result.text)  # "HSNR"
 ```
+
+**两个对外快捷接口**：`recognize(image)` 通用识别（无专用模型，内置 ddddocr 多策略投票）；`recognize_apple(image)` 苹果验证码专用（自动加载 `models/apple_captcha.onnx`，自定义结果经 `gap_min≥0.08` 置信门槛后优先，对非苹果图自动退回内置投票）。底层类 `CaptchaRecognizer(model_path=...)` 仍保留，供使用其他自定义模型或多实例场景。
 
 `CaptchaResult` 结构体：
 
@@ -268,7 +276,7 @@ result = recognize("images/test.png")
 
 ### 7. 接入 AI Agent（WorkBuddy / Claude）
 
-项目通过 MCP Server（`mcp/mcp_server.py`）将验证码识别暴露为 AI Agent 可直接调用的工具（`recognize_captcha` / `recognize_captcha_base64` / `recognize_captcha_batch`），并附 WorkBuddy 技能包。一键安装、手动注册、工具说明与调用流程见 **[doc/ai-agent-integration.md](doc/ai-agent-integration.md)**。
+项目通过 MCP Server（`mcp/mcp_server.py`）将验证码识别暴露为 AI Agent 可直接调用的工具（`recognize_captcha` / `recognize_captcha_base64` / `recognize_captcha_batch` / `recognize_apple_captcha`），并附 WorkBuddy 技能包。一键安装、手动注册、工具说明与调用流程见 **[doc/ai-agent-integration.md](doc/ai-agent-integration.md)**。
 
 ---
 
@@ -332,17 +340,17 @@ python src/main.py images/test.png --model models/<模型名>.onnx
 
 > `charsets.json` 放在 **onnx 同目录**时自动加载，只需传 `--model` 即可；字符集必须与模型配套，否则解码乱码。
 
-`--model` 模式下会同时展示通用模型与自定义模型的识别结果，**有自定义结果时直接以它为首选**（专用模型针对该类验证码训练，远强于内置多变体投票）。不传 `--model` 时行为不变，仍使用内置 ddddocr。
+`--model` 模式下会同时展示通用模型与自定义模型的识别结果，**自定义结果优先**（专用模型针对该类验证码训练，远强于内置多变体投票）。但自定义结果需通过**置信门槛**：模型逐时间步 softmax 最高两类的差距最小值 `gap_min ≥ 0.08` 时才采用（这类图与训练集同分布，模型确信）；对非该类别图（如普通验证码）模型会摇摆、`gap_min` 低，此时自动退回内置多变体投票，避免专用模型把垃圾结果强加给无关图。不传 `--model` 时行为不变，仍使用内置 ddddocr。
 
 **苹果验证码实例**（迁移模型已就位，用短命令即可）：
 
 ```bash
-python src/main.py captcha_data/labeled/apple/4BKAA_2026-08-03-10-38-52.png --model models/apple_captcha.onnx
+python src/main.py captcha_data/labeled/apple/HSNR_2026-08-03-19-28-28.png --model models/apple_captcha.onnx
 ```
 
 ```
-  原图(自定义)         : 4BKAA
-验证码    : 4BKAA
+  原图(自定义)         : HSNR
+验证码    : HSNR
 ```
 
 > 注意：`models/apple_captcha.onnx` 现为迁移学习模型（8-04 更新，验证集约 71%）。此前 8-03 的旧过拟合模型已覆盖，勿再使用旧产物。

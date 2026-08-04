@@ -86,9 +86,16 @@ class CacheData:
 
             else:
                 logger.warning("\nFile({}) has a suffix that is not allowed! We will remove it!".format(file))
-        labels = list(set(labels))
-        if not self.conf['Model']['Word']:
-            labels.insert(0, " ")
+        labels = set(labels)
+        # 保持已有 charset 顺序稳定(续训时 fc 输出索引按 charset 顺序对应, 重排会错乱):
+        # 已有字符保留原顺序, 新字符按字母序追加. 非 Word 模式首位空格(CTC blank)保留.
+        old_charset = list(self.conf['Model'].get('CharSet') or [])
+        if old_charset:
+            labels = old_charset + sorted(labels - set(old_charset))
+        else:
+            labels = list(labels)
+            if not self.conf['Model']['Word']:
+                labels.insert(0, " ")
         logger.info("\nCoolect labels is {}".format(json.dumps(labels, ensure_ascii=False)))
         self.conf['System']['Path'] = base_path
         self.conf['Model']['CharSet'] = labels

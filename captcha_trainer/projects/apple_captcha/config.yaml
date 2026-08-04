@@ -1,6 +1,6 @@
 Model:
-    CharSet: [' ', X, V, N, K, G, E, U, Z, B, A, J, D, '3', Y, '9', '7', Q, P, '2',
-        L, W, R, I, M, S, F, '4', C, H, T]
+    CharSet: [' ', '9', P, H, V, W, T, B, C, A, M, U, Z, '7', '4', R, E, '1', O, '2',
+        G, '5', X, I, '3', F, Y, K, L, S, Q, J, D, N]
     ImageChannel: 1
     ImageHeight: 64
     ImageWidth: -1
@@ -11,14 +11,14 @@ System:
     GPU_ID: 0
     Path: ../captcha_data/labeled/apple
     Project: apple_captcha
-    Val: 0.03
+    Val: 0.15
 Train:
     BATCH_SIZE: 32
     CNN: {NAME: ddddocr}
     DROPOUT: 0.3
     LR: 0.01
     OPTIMIZER: SGD
-    SAVE_CHECKPOINTS_STEP: 2000
-    TARGET: {Accuracy: 1.0, Cost: 0.05, Epoch: 20}
+    SAVE_CHECKPOINTS_STEP: 200
+    TARGET: {Accuracy: 0.7, Cost: 0.05, Epoch: 20}
     TEST_BATCH_SIZE: 32
-    TEST_STEP: 1000
+    TEST_STEP: 50

@@ -18,3 +18,8 @@ __pycache__/
 
 # === 测试缓存 ===
 .pytest_cache/
+
+# === 训练模型产物（体积大，不应提交） ===
+**/checkpoints/
+**/checkpoints_backup/
+*.onnx

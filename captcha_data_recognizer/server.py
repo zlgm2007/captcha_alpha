@@ -4,13 +4,17 @@
 # Licensed under the MIT License. See LICENSE for details.
 """验证码识别工具 - 本地 Web 服务器(仅用 Python 标准库, 零第三方依赖).
 
-提交图片 -> 调用 ../src/api.py 的 recognize_apple() -> 返回验证码内容.
-recognize_apple 自动加载 ../models/apple_captcha.onnx(苹果专用迁移模型),
-带 gap_min>=0.08 置信门槛: 非苹果图(模型不确定)自动退回内置多策略投票.
+提交图片 -> 调用 ../src/api.py 的识别管线 -> 返回验证码内容.
+
+- 单图识别: 可选择模型(models/*.onnx 下拉) 或不选(内置 ddddocr 多策略投票).
+  选中模型时走 CaptchaRecognizer(model_path=...) 管线, 等价于 recognize_apple
+  (带 gap_min>=0.08 置信门槛: 非本模型类别图自动退回内置投票).
+- 批量测试: 选模型(默认不选) + captcha_data/labeled 下的某个批次目录, 后台逐张
+  识别, 表格对比 标记值 vs 模型识别值(✓一致 / ✗不一致), 支持进度查询与缩略图.
 
 用法: python server.py [--port 8772]
 浏览器打开 http://127.0.0.1:8772 即可使用.
-识别能力依赖 ../src/api.py, 缺失时 /api/recognize 会返回明确的错误.
+识别能力依赖 ../src/api.py, 缺失时相关 API 返回明确的错误.
 """
 import argparse
 import base64
@@ -18,8 +22,9 @@ import json
 import os
 import sys
 import threading
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 MAX_UPLOAD = 50 * 1024 * 1024   # 50MB(含 base64 膨胀)
 
@@ -29,15 +34,114 @@ _SRC_DIR = os.path.abspath(os.path.join(
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 
-# 串行化识别调用(api 内部模型单例; 并发时锁住避免 onnxruntime 竞争)
-_RECOGNIZE_LOCK = threading.Lock()
+# 数据/模型目录(仓库根)
+_REPO_DIR = os.path.abspath(os.path.join(_SRC_DIR, ".."))
+_MODELS_DIR = os.path.join(_REPO_DIR, "models")
+_LABELED_DIR = os.path.join(_REPO_DIR, "captcha_data", "labeled")
+_ALLOW_EXT = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
+
+# 串行化识别调用(api 内部 onnxruntime 模型非线程安全; 并发时锁住避免竞争).
+# RLock 可重入: _recognize 持锁后内部 _get_recognizer 也加锁, 避免同线程死锁.
+_RECOGNIZE_LOCK = threading.RLock()
+# 按 model_path 缓存的识别器(切换模型/不选模型时复用, 避免重复加载)
+_RECOGNIZERS: dict = {}
+# 批跑任务表 {job_id: {...}}
+_JOBS: dict = {}
+_JOBS_LOCK = threading.Lock()
 
 
-def _recognize_apple(blob):
-    """调用 api.recognize_apple(bytes) 并返回 CaptchaResult."""
-    from api import recognize_apple
+def _get_recognizer(model_path):
+    """按 model_path 缓存 CaptchaRecognizer; "" 表示内置(无专用模型)."""
     with _RECOGNIZE_LOCK:
-        return recognize_apple(blob)
+        rec = _RECOGNIZERS.get(model_path)
+        if rec is None:
+            from api import CaptchaRecognizer
+            rec = CaptchaRecognizer(model_path=model_path)
+            _RECOGNIZERS[model_path] = rec
+        return rec
+
+
+def _recognize(blob, model_path=""):
+    """调用识别管线并返回 CaptchaResult. 串行锁保护."""
+    with _RECOGNIZE_LOCK:
+        return _get_recognizer(model_path).recognize(blob)
+
+
+def _list_models():
+    """列出 models/*.onnx(排除 .bak 备份)."""
+    if not os.path.isdir(_MODELS_DIR):
+        return []
+    return sorted(
+        f for f in os.listdir(_MODELS_DIR)
+        if f.lower().endswith(".onnx") and not f.endswith(".bak"))
+
+
+def _list_batches():
+    """列出 captcha_data/labeled 下的批次目录."""
+    if not os.path.isdir(_LABELED_DIR):
+        return []
+    return sorted(
+        d for d in os.listdir(_LABELED_DIR)
+        if os.path.isdir(os.path.join(_LABELED_DIR, d)) and not d.startswith("."))
+
+
+def _batch_images(batch):
+    """批次目录内的图片文件名(过滤非图片/隐藏文件)."""
+    d = os.path.join(_LABELED_DIR, batch)
+    if not os.path.isdir(d):
+        raise ValueError(f"批次不存在: {batch}")
+    return sorted(f for f in os.listdir(d)
+                  if os.path.splitext(f)[1].lower() in _ALLOW_EXT
+                  and not f.startswith("."))
+
+
+def _label_from_name(filename):
+    """文件名 <标签>_<时间戳>.png -> 标签(最后一个 _ 之前的部分)."""
+    stem = os.path.splitext(filename)[0]
+    if "_" in stem:
+        return "_".join(stem.split("_")[:-1])
+    return stem
+
+
+def _resolve_model(model):
+    """模型下拉值 -> 绝对路径; 空值表示内置."""
+    if not model:
+        return ""
+    path = os.path.abspath(os.path.join(_MODELS_DIR, model))
+    if os.path.dirname(path) != os.path.abspath(_MODELS_DIR):
+        raise ValueError("非法模型名")
+    if not os.path.isfile(path):
+        raise ValueError(f"模型不存在: {model}")
+    return path
+
+
+def _run_batch(job):
+    """后台批跑: 逐张识别并更新进度/结果."""
+    items = job["items"]
+    for idx, (fn, label) in enumerate(items):
+        if job["cancel"]:
+            job["status"] = "canceled"
+            return
+        try:
+            path = os.path.join(_LABELED_DIR, job["batch"], fn)
+            with open(path, "rb") as f:
+                blob = f.read()
+            result = _recognize(blob, job["model_path"])
+            pred, conf = result.text, result.confidence
+        except Exception as e:
+            pred, conf = "", 0.0
+        # 标记值/识别值统一大写再比较与展示(内置 ddddocr 可能输出小写)
+        label_up = label.upper()
+        pred_up = pred.upper() if pred else ""
+        job["results"].append({
+            "filename": fn,
+            "label": label_up,
+            "prediction": pred_up,
+            "match": bool(label_up and pred_up == label_up),
+            "confidence": round(conf, 4),
+        })
+        job["processed"] = idx + 1
+    job["status"] = "done"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -73,11 +177,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
+        query = parse_qs(urlparse(self.path).query)
         try:
             if path == "/":
                 self._serve_static("index.html")
             elif path.startswith("/static/"):
                 self._serve_static(path[len("/static/"):])
+            elif path == "/api/models":
+                self._send_json({"models": _list_models()})
+            elif path == "/api/batches":
+                self._send_json({"batches": _list_batches()})
+            elif path == "/api/batch/status":
+                self._api_batch_status(query)
+            elif path == "/api/batch/result":
+                self._api_batch_result(query)
+            elif path == "/api/image":
+                self._api_image(query)
             else:
                 self._send_json({"error": "not found"}, 404)
         except ValueError as e:
@@ -90,6 +205,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/recognize":
                 self._api_recognize()
+            elif path == "/api/batch/start":
+                self._api_batch_start()
+            elif path == "/api/batch/cancel":
+                self._api_batch_cancel()
             else:
                 self._send_json({"error": "not found"}, 404)
         except ValueError as e:
@@ -130,9 +249,10 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("图片数据不是有效 base64")
         if not blob:
             raise ValueError("图片数据为空")
+        model_path = _resolve_model(body.get("model", ""))
         from api import CaptchaError
         try:
-            result = _recognize_apple(blob)
+            result = _recognize(blob, model_path)
         except CaptchaError as e:
             self._send_json({"error": f"图片无效: {e}"}, 400)
             return
@@ -141,12 +261,96 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_json({
             "ok": True,
+            "model": body.get("model", ""),
             "text": result.text,
             "confidence": result.confidence,
             "length": result.length,
             "candidates": [{"label": c.label, "text": c.text}
                            for c in result.candidates],
         })
+
+    def _api_batch_start(self):
+        body = self._read_json()
+        batch = str(body.get("batch", "")).strip()
+        if not batch:
+            raise ValueError("缺少批次名")
+        images = _batch_images(batch)
+        if not images:
+            raise ValueError(f"批次 {batch} 没有可识别的图片")
+        model_path = _resolve_model(body.get("model", ""))
+        job = {
+            "id": uuid.uuid4().hex,
+            "batch": batch,
+            "model": body.get("model", ""),
+            "model_path": model_path,
+            "items": [(fn, _label_from_name(fn)) for fn in images],
+            "total": len(images),
+            "processed": 0,
+            "results": [],
+            "status": "running",
+            "cancel": False,
+        }
+        with _JOBS_LOCK:
+            _JOBS[job["id"]] = job
+        threading.Thread(target=_run_batch, args=(job,), daemon=True).start()
+        self._send_json({"ok": True, "job_id": job["id"], "total": job["total"]})
+
+    def _api_batch_status(self, query):
+        job_id = (query.get("job_id") or [""])[0]
+        with _JOBS_LOCK:
+            job = _JOBS.get(job_id)
+        if not job:
+            raise ValueError("任务不存在")
+        self._send_json({
+            "status": job["status"],
+            "total": job["total"],
+            "processed": job["processed"],
+        })
+
+    def _api_batch_cancel(self):
+        body = self._read_json()
+        job_id = str(body.get("job_id", "")).strip()
+        with _JOBS_LOCK:
+            job = _JOBS.get(job_id)
+        if not job:
+            raise ValueError("任务不存在")
+        job["cancel"] = True
+        self._send_json({"ok": True})
+
+    def _api_batch_result(self, query):
+        job_id = (query.get("job_id") or [""])[0]
+        with _JOBS_LOCK:
+            job = _JOBS.get(job_id)
+        if not job:
+            raise ValueError("任务不存在")
+        results = list(job["results"])
+        matched = sum(1 for r in results if r["match"])
+        self._send_json({
+            "status": job["status"],
+            "total": job["total"],
+            "processed": job["processed"],
+            "matched": matched,
+            "results": results,
+        })
+
+    def _api_image(self, query):
+        batch = (query.get("batch") or [""])[0]
+        filename = (query.get("file") or [""])[0]
+        if not batch or not filename:
+            raise ValueError("缺少 batch 或 file 参数")
+        d = os.path.abspath(os.path.join(_LABELED_DIR, batch))
+        if os.path.dirname(d) != os.path.abspath(_LABELED_DIR):
+            raise ValueError("非法批次名")
+        path = os.path.abspath(os.path.join(d, filename))
+        if os.path.dirname(path) != d:
+            raise ValueError("非法文件名")
+        if not os.path.isfile(path):
+            raise ValueError("图片不存在")
+        ext = os.path.splitext(filename)[1].lower()
+        ctype = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                 "bmp": "image/bmp", "webp": "image/webp"}.get(ext, "application/octet-stream")
+        with open(path, "rb") as f:
+            self._send_bytes(f.read(), ctype)
 
 
 def main():
@@ -157,7 +361,7 @@ def main():
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     url = f"http://127.0.0.1:{args.port}"
     print("=" * 50)
-    print("  验证码识别工具已启动 (recognize_apple)")
+    print("  验证码识别工具已启动 (模型可选 / 批量测试)")
     print(f"  打开浏览器: {url}")
     print("  按 Ctrl+C 停止")
     print("=" * 50)

@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>验证码识别工具</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Microsoft YaHei", sans-serif;
+    background: #f0f2f5; color: #1f2328; min-height: 100vh;
+    display: flex; justify-content: center; padding: 40px 16px;
+  }
+  .card {
+    background: #fff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,.08);
+    padding: 32px; width: 100%; max-width: 560px; align-self: flex-start;
+  }
+  h1 { font-size: 22px; }
+  .sub { color: #656d76; font-size: 13px; margin: 6px 0 24px; }
+  .sub code { background: #f6f8fa; padding: 1px 5px; border-radius: 4px; }
+  .drop {
+    border: 2px dashed #c9ccd1; border-radius: 8px; padding: 36px 16px;
+    text-align: center; color: #57606a; cursor: pointer; transition: all .15s;
+  }
+  .drop.dragover { border-color: #0969da; background: #f0f6ff; color: #0969da; }
+  .drop p { font-size: 14px; }
+  .drop small { display: block; margin-top: 6px; font-size: 12px; color: #8b949e; }
+  .preview { margin-top: 16px; text-align: center; display: none; }
+  .preview img {
+    max-width: 100%; max-height: 180px; border: 1px solid #e1e4e8;
+    border-radius: 8px; image-rendering: pixelated;
+  }
+  .btn {
+    margin-top: 16px; width: 100%; padding: 12px; font-size: 15px;
+    background: #0969da; color: #fff; border: none; border-radius: 8px; cursor: pointer;
+  }
+  .btn:disabled { background: #c9ccd1; cursor: not-allowed; }
+  .result { margin-top: 20px; display: none; }
+  .text-box {
+    display: flex; align-items: center; gap: 12px; justify-content: center;
+    background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 8px; padding: 20px;
+  }
+  .text-box .lbl { font-size: 13px; color: #57606a; }
+  .captcha {
+    font-family: "SF Mono", Consolas, Menlo, monospace; font-size: 40px;
+    font-weight: 700; letter-spacing: 6px; color: #0969da;
+  }
+  .meta { text-align: center; font-size: 13px; color: #57606a; margin-top: 10px; }
+  details { margin-top: 14px; }
+  summary { cursor: pointer; font-size: 13px; color: #57606a; }
+  ul { list-style: none; margin-top: 8px; }
+  li {
+    display: flex; justify-content: space-between; padding: 6px 10px;
+    font-size: 13px; border-radius: 6px;
+  }
+  li:nth-child(odd) { background: #f6f8fa; }
+  li .lbl2 { color: #57606a; }
+  li .txt2 { font-family: "SF Mono", Consolas, monospace; font-weight: 600; }
+  .err {
+    margin-top: 16px; padding: 12px; border-radius: 8px; background: #fff1f0;
+    border: 1px solid #ffccc7; color: #cf222e; font-size: 13px; display: none;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>验证码识别工具</h1>
+  <p class="sub">调用 <code>api.py</code> 的 <code>recognize_apple()</code> — 苹果专用迁移模型，带置信门槛</p>
+
+  <div class="drop" id="drop">
+    <p>点击选择图片，或将图片拖到这里</p>
+    <small>支持 png / jpg / jpeg / bmp / webp 等常见格式</small>
+  </div>
+  <input type="file" id="file" accept="image/*" hidden>
+
+  <div class="preview" id="previewWrap"><img id="preview" alt="预览"></div>
+
+  <button class="btn" id="btn" disabled>识别</button>
+
+  <div class="result" id="result">
+    <div class="text-box">
+      <span class="lbl">验证码</span>
+      <span class="captcha" id="captcha"></span>
+    </div>
+    <div class="meta">置信度 <span id="conf">0</span>　·　长度 <span id="len">0</span></div>
+    <details>
+      <summary>全部候选（<span id="candCount">0</span> 条）</summary>
+      <ul id="candList"></ul>
+    </details>
+  </div>
+
+  <div class="err" id="error"></div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let currentFile = null;
+
+$("#drop").addEventListener("click", () => $("#file").click());
+$("#file").addEventListener("change", e => {
+  if (e.target.files[0]) setFile(e.target.files[0]);
+});
+["dragover", "dragenter"].forEach(ev =>
+  $("#drop").addEventListener(ev, e => {
+    e.preventDefault();
+    $("#drop").classList.add("dragover");
+  }));
+["dragleave", "drop"].forEach(ev =>
+  $("#drop").addEventListener(ev, e => {
+    e.preventDefault();
+    $("#drop").classList.remove("dragover");
+  }));
+$("#drop").addEventListener("drop", e => {
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) setFile(f);
+});
+
+function setFile(f) {
+  currentFile = f;
+  $("#preview").src = URL.createObjectURL(f);
+  $("#previewWrap").style.display = "block";
+  $("#btn").disabled = false;
+  hideError();
+  hideResult();
+}
+
+$("#btn").addEventListener("click", async () => {
+  if (!currentFile) return;
+  $("#btn").disabled = true;
+  $("#btn").textContent = "识别中…";
+  try {
+    const b64 = await fileToBase64(currentFile);
+    const r = await fetch("/api/recognize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data: b64 }),
+    });
+    const d = await r.json();
+    if (!r.ok) { showError(d.error || "识别失败"); return; }
+    showResult(d);
+  } catch (e) {
+    showError(String(e && e.message || e));
+  } finally {
+    $("#btn").textContent = "识别";
+    if (currentFile) $("#btn").disabled = false;
+  }
+});
+
+function fileToBase64(f) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1]);
+    r.onerror = () => reject(r.error || new Error("读取文件失败"));
+    r.readAsDataURL(f);
+  });
+}
+
+function showResult(d) {
+  $("#captcha").textContent = d.text || "(空)";
+  $("#conf").textContent = (d.confidence * 100).toFixed(1) + "%";
+  $("#len").textContent = d.length;
+  $("#candCount").textContent = (d.candidates || []).length;
+  $("#candList").innerHTML = (d.candidates || []).map(c =>
+    `<li><span class="lbl2">${esc(c.label)}</span><span class="txt2">${esc(c.text)}</span></li>`
+  ).join("");
+  $("#result").style.display = "block";
+  hideError();
+}
+
+function showError(msg) {
+  $("#error").textContent = msg;
+  $("#error").style.display = "block";
+  hideResult();
+}
+function hideError() { $("#error").style.display = "none"; }
+function hideResult() { $("#result").style.display = "none"; }
+function esc(s) {
+  return String(s).replace(/[&<>"']/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+</script>
+</body>
+</html>

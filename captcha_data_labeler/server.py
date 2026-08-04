@@ -45,6 +45,9 @@ DEFAULT_CONFIG = {"minLength": 4, "maxLength": 6, "uppercase": True, "model": ""
 MODELS_DIR = os.path.abspath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "models"))
 
+# 图片目录类型 -> 数据根下的子目录名 (kind=unrecognized 对应 unrecognizable)
+KIND_DIR = {"raw": "raw", "labeled": "labeled", "unrecognized": "unrecognizable"}
+
 
 def _config_path():
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "labeler_config.json")
@@ -341,6 +344,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_unlabeled()
             elif path == "/api/labeled":
                 self._api_labeled()
+            elif path == "/api/unrecognized":
+                self._api_unrecognized()
             elif path == "/api/image":
                 self._api_image()
             elif path == "/api/models":
@@ -364,6 +369,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_save_label()
             elif path == "/api/modify_label":
                 self._api_modify_label()
+            elif path == "/api/unrecognize":
+                self._api_unrecognize()
+            elif path == "/api/relabel_unrecognized":
+                self._api_relabel_unrecognized()
+            elif path == "/api/return_unrecognized":
+                self._api_return_unrecognized()
             elif path == "/api/upload":
                 self._api_upload()
             elif path == "/api/extract_archive":
@@ -400,8 +411,9 @@ class Handler(BaseHTTPRequestHandler):
     def _api_dirs(self):
         raw_root = _safe_join(self.data_root, "raw")
         labeled_root = _safe_join(self.data_root, "labeled")
+        unrec_root = _safe_join(self.data_root, "unrecognizable")
         names = set()
-        for root in (raw_root, labeled_root):
+        for root in (raw_root, labeled_root, unrec_root):
             if os.path.isdir(root):
                 names.update(d for d in os.listdir(root) if os.path.isdir(
                     _safe_join(root, d)))
@@ -409,10 +421,12 @@ class Handler(BaseHTTPRequestHandler):
         for name in sorted(names):
             raw = _safe_join(raw_root, name)
             lab = _safe_join(labeled_root, name)
+            unrec = _safe_join(unrec_root, name)
             dirs.append({
                 "name": name,
                 "rawCount": len(_image_files(raw)),
                 "labeledCount": len(_image_files(lab)),
+                "unrecognizedCount": len(_image_files(unrec)),
             })
         self._send_json({"dirs": dirs})
 
@@ -435,13 +449,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _api_image(self):
         kind = self._query("kind", "raw")
-        if kind not in ("raw", "labeled"):
-            raise ValueError("kind 必须为 raw 或 labeled")
+        if kind not in KIND_DIR:
+            raise ValueError("kind 必须为 raw / labeled / unrecognized")
         name = self._query("dir")
         self._require_dir(name)
         fname = self._query("file")
         scale = int(self._query("scale", "1"))
-        path = _safe_join(self.data_root, kind, name, fname)
+        path = _safe_join(self.data_root, KIND_DIR[kind], name, fname)
         if not os.path.isfile(path):
             raise ValueError("文件不存在")
         try:
@@ -534,8 +548,11 @@ class Handler(BaseHTTPRequestHandler):
         body = self._read_json()
         name = body.get("dir", "")
         self._require_dir(name)
+        kind = body.get("kind", "raw")
+        if kind not in KIND_DIR:
+            raise ValueError("kind 必须为 raw / labeled / unrecognized")
         filename = os.path.basename(body.get("filename", ""))
-        path = _safe_join(self.data_root, "raw", name, filename)
+        path = _safe_join(self.data_root, KIND_DIR[kind], name, filename)
         if not os.path.isfile(path):
             raise ValueError("文件不存在")
         model_file = body.get("model", "") or ""
@@ -568,6 +585,63 @@ class Handler(BaseHTTPRequestHandler):
         os.makedirs(target_dir, exist_ok=True)
         count = _extract_archive(blob, ext, target_dir)
         self._send_json({"ok": True, "imported": count})
+
+    def _api_unrecognized(self):
+        """返回当前批次 unrecognizable/ 下的文件列表."""
+        name = self._query("dir")
+        self._require_dir(name)
+        unrec_dir = _safe_join(self.data_root, "unrecognizable", name)
+        self._send_json({"files": _image_files(unrec_dir)})
+
+    def _api_unrecognize(self):
+        """把未标记的图移入无法识别目录(保留原文件名, 冲突时追加后缀)."""
+        body = self._read_json()
+        name = body.get("dir", "")
+        self._require_dir(name)
+        filename = os.path.basename(body.get("filename", ""))
+        src = _safe_join(self.data_root, "raw", name, filename)
+        if not os.path.isfile(src):
+            raise ValueError(f"源文件不存在: {filename}")
+        unrec_dir = _safe_join(self.data_root, "unrecognizable", name)
+        os.makedirs(unrec_dir, exist_ok=True)
+        used = set(os.listdir(unrec_dir)) if os.path.isdir(unrec_dir) else set()
+        dst_name = _dedup_name(unrec_dir, filename, used)
+        os.replace(src, os.path.join(unrec_dir, dst_name))
+        self._send_json({"ok": True, "filename": dst_name})
+
+    def _api_relabel_unrecognized(self):
+        """把无法识别的图标记保存到 labeled(尝试再标记成功)."""
+        body = self._read_json()
+        name = body.get("dir", "")
+        self._require_dir(name)
+        filename = os.path.basename(body.get("filename", ""))
+        label, err = validate_label(body.get("label", ""), self.cfg)
+        if err:
+            raise ValueError(err)
+        src = _safe_join(self.data_root, "unrecognizable", name, filename)
+        if not os.path.isfile(src):
+            raise ValueError(f"无法识别的文件不存在: {filename}")
+        original = sanitize_filename(filename)
+        dst = _safe_join(self.data_root, "labeled", name, f"{label}_{original}")
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        os.replace(src, dst)
+        self._send_json({"ok": True, "saved": os.path.basename(dst)})
+
+    def _api_return_unrecognized(self):
+        """把无法识别的图放回未标记目录(再次尝试)."""
+        body = self._read_json()
+        name = body.get("dir", "")
+        self._require_dir(name)
+        filename = os.path.basename(body.get("filename", ""))
+        src = _safe_join(self.data_root, "unrecognizable", name, filename)
+        if not os.path.isfile(src):
+            raise ValueError(f"无法识别的文件不存在: {filename}")
+        raw_dir = _safe_join(self.data_root, "raw", name)
+        os.makedirs(raw_dir, exist_ok=True)
+        used = set(os.listdir(raw_dir)) if os.path.isdir(raw_dir) else set()
+        dst_name = _dedup_name(raw_dir, filename, used)
+        os.replace(src, os.path.join(raw_dir, dst_name))
+        self._send_json({"ok": True, "filename": dst_name})
 
     def _api_config(self):
         body = self._read_json()

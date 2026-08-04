@@ -58,6 +58,9 @@
   #statusBar { margin-top: 8px; font-size: 13px; color: var(--muted); min-height: 20px; }
   #statusBar.err { color: var(--err); }
   #statusBar.ok { color: var(--ok); }
+  #statusBar2 { margin-top: 8px; font-size: 13px; color: var(--muted); min-height: 20px; }
+  #statusBar2.err { color: var(--err); }
+  #statusBar2.ok { color: var(--ok); }
   .thumb-strip {
     margin-top: 12px; display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px;
   }
@@ -113,6 +116,7 @@
 <nav class="tabs">
   <button id="tabUnlabeled" class="active">未标记标注</button>
   <button id="tabLabeled">已标记修改</button>
+  <button id="tabUnrecognized">无法识别</button>
 </nav>
 
 <main>
@@ -127,6 +131,7 @@
         <input id="labelInput" placeholder="输入标签，回车保存" autocomplete="off" spellcheck="false">
         <button id="btnSave" class="primary">保存 (Enter)</button>
         <button id="btnSkip">跳过</button>
+        <button id="btnUnrec">无法识别</button>
       </div>
       <div id="statusBar"></div>
       <div id="thumbStrip" class="thumb-strip"></div>
@@ -153,6 +158,23 @@
       <div id="editInfo">点击左侧图片以修改标签</div>
     </div>
   </section>
+
+  <!-- 无法识别 -->
+  <section id="panelUnrecognized" class="col-main hidden">
+    <div class="col-main">
+      <div class="preview-box">
+        <img id="unrecPreview" alt="" style="display:none">
+        <div id="unrecMeta">尚未选择图片</div>
+      </div>
+      <div class="input-row">
+        <input id="unrecInput" placeholder="输入标签，尝试再标记" autocomplete="off" spellcheck="false">
+        <button id="btnUnrecSave" class="primary">标记保存 (Enter)</button>
+        <button id="btnUnrecReturn">放回未标记</button>
+      </div>
+      <div id="statusBar2"></div>
+      <div id="unrecStrip" class="thumb-strip"></div>
+    </div>
+  </section>
 </main>
 
 <script>
@@ -162,6 +184,7 @@ const enc = encodeURIComponent;
 const state = {
   dir: null, unlabeled: [], idx: 0,
   labeled: [], selLabeled: null,
+  unrec: [], unrecIdx: 0,
   cfg: { length: 5, uppercase: true },
   model: "",
 };
@@ -185,6 +208,11 @@ const imgUrl = (kind, dir, file, scale = 1) =>
 /* ---------- 工具 ---------- */
 function setStatus(msg, cls) {
   const el = $("#statusBar");
+  el.textContent = msg || "";
+  el.className = cls ? cls : "";
+}
+function setStatus2(msg, cls) {
+  const el = $("#statusBar2");
   el.textContent = msg || "";
   el.className = cls ? cls : "";
 }
@@ -250,12 +278,12 @@ async function loadDirs() {
   if (state.dir) {
     const it = d.dirs.find(x => x.name === state.dir);
     $("#dirInfo").textContent = it
-      ? `未标记 ${it.rawCount} 张  /  已标记 ${it.labeledCount} 张`
+      ? `未标记 ${it.rawCount} 张  /  已标记 ${it.labeledCount} 张  /  无法识别 ${it.unrecognizedCount || 0} 张`
       : "";
   } else {
     $("#dirInfo").textContent = "请选择批次目录";
   }
-  await Promise.all([loadUnlabeled(), loadLabeled()]);
+  await Promise.all([loadUnlabeled(), loadLabeled(), loadUnrecognized()]);
 }
 
 async function refreshAll() {
@@ -388,7 +416,7 @@ async function refreshDirsCount() {
   try {
     const d = await api("/api/dirs");
     const it = d.dirs.find(x => x.name === state.dir);
-    if (it) $("#dirInfo").textContent = `未标记 ${it.rawCount} 张  /  已标记 ${it.labeledCount} 张`;
+    if (it) $("#dirInfo").textContent = `未标记 ${it.rawCount} 张  /  已标记 ${it.labeledCount} 张  /  无法识别 ${it.unrecognizedCount || 0} 张`;
   } catch (_) {}
 }
 
@@ -503,26 +531,144 @@ async function modifyLabel() {
   } catch (e) { setEditInfo("修改失败: " + e.message); }
 }
 
+/* ---------- 无法识别标注 ---------- */
+async function loadUnrecognized() {
+  if (!state.dir) { state.unrec = []; state.unrecIdx = 0; showUnrecognized(); return; }
+  const d = await api(`/api/unrecognized?dir=${enc(state.dir)}`);
+  state.unrec = d.files || [];
+  if (state.unrecIdx >= state.unrec.length) state.unrecIdx = Math.max(0, state.unrec.length - 1);
+  showUnrecognized();
+}
+
+function showUnrecognized() {
+  const img = $("#unrecPreview");
+  const meta = $("#unrecMeta");
+  const input = $("#unrecInput");
+  const btn = $("#btnUnrecSave");
+  const files = state.unrec;
+  if (!state.dir || !files.length) {
+    img.style.display = "none";
+    meta.textContent = state.dir ? "没有无法识别的图片" : "请先选择批次目录";
+    input.value = "";
+    input.disabled = true; btn.disabled = true; $("#btnUnrecReturn").disabled = true;
+    renderUnrecThumbs();
+    setStatus2(state.dir ? "当前批次没有无法识别的图片" : "");
+    return;
+  }
+  const filename = files[state.unrecIdx];
+  img.src = imgUrl("unrecognized", state.dir, filename, 2);
+  img.style.display = "block";
+  meta.textContent = `${fmtUnrecProg()} · ${filename}`;
+  input.disabled = false; btn.disabled = false; $("#btnUnrecReturn").disabled = false;
+  input.value = "";
+  input.focus();
+  renderUnrecThumbs();
+  prefillUnrecognized(filename);
+}
+
+function fmtUnrecProg() {
+  return `第 ${Math.min(state.unrecIdx + 1, state.unrec.length)} / ${state.unrec.length} 张`;
+}
+
+function renderUnrecThumbs() {
+  const strip = $("#unrecStrip");
+  strip.innerHTML = "";
+  state.unrec.forEach((f, i) => {
+    const t = document.createElement("div");
+    t.className = "thumb" + (i === state.unrecIdx ? " active" : "") + (i < state.unrecIdx ? " done" : "");
+    t.title = f;
+    const img = document.createElement("img");
+    img.src = imgUrl("unrecognized", state.dir, f, 1);
+    img.loading = "lazy";
+    const idx = document.createElement("span");
+    idx.className = "idx"; idx.textContent = i + 1;
+    t.appendChild(img); t.appendChild(idx);
+    t.onclick = () => { state.unrecIdx = i; showUnrecognized(); };
+    strip.appendChild(t);
+  });
+}
+
+async function prefillUnrecognized(filename) {
+  const dir = state.dir;
+  if (!dir) return;
+  try {
+    const d = await post("/api/prefill", { dir, filename, kind: "unrecognized", model: state.model });
+    if (state.dir !== dir) return;
+    if (state.unrec[state.unrecIdx] !== filename) return;
+    const input = $("#unrecInput");
+    if (!input.value && d.text) input.value = d.text;
+    setStatus2("OCR 预填: " + (d.text || "(未能识别)"));
+  } catch (_) { /* 预填失败不打扰 */ }
+}
+
+async function saveUnrecognized() {
+  if (!state.dir || state.unrecIdx >= state.unrec.length) return;
+  const filename = state.unrec[state.unrecIdx];
+  const label = normalizeLabel($("#unrecInput").value);
+  if (!label) return setStatus2("请输入标签", "err");
+  try {
+    const d = await post("/api/relabel_unrecognized", { dir: state.dir, filename, label });
+    state.unrec.splice(state.unrecIdx, 1);
+    if (state.unrecIdx >= state.unrec.length && state.unrec.length > 0)
+      state.unrecIdx = state.unrec.length - 1;
+    showUnrecognized();
+    refreshDirsCount();
+    setStatus2("已标记保存: " + d.saved, "ok");
+  } catch (e) { setStatus2("标记失败: " + e.message, "err"); }
+}
+
+async function returnUnrecognized() {
+  if (!state.dir || state.unrecIdx >= state.unrec.length) return;
+  const filename = state.unrec[state.unrecIdx];
+  try {
+    const d = await post("/api/return_unrecognized", { dir: state.dir, filename });
+    state.unrec.splice(state.unrecIdx, 1);
+    if (state.unrecIdx >= state.unrec.length && state.unrec.length > 0)
+      state.unrecIdx = state.unrec.length - 1;
+    showUnrecognized();
+    await Promise.all([loadUnlabeled(), refreshDirsCount()]);
+    setStatus2("已放回未标记: " + d.filename, "ok");
+  } catch (e) { setStatus2("放回失败: " + e.message, "err"); }
+}
+
+async function unrecognizeCurrent() {
+  const dir = state.dir;
+  if (!dir || state.idx >= state.unlabeled.length) return;
+  const filename = state.unlabeled[state.idx];
+  try {
+    const d = await post("/api/unrecognize", { dir, filename });
+    state.unlabeled.splice(state.idx, 1);
+    if (state.idx >= state.unlabeled.length && state.unlabeled.length > 0)
+      state.idx = state.unlabeled.length - 1;
+    showUnlabeled();
+    refreshDirsCount();
+    setStatus("已移入无法识别: " + d.filename, "ok");
+  } catch (e) { setStatus("操作失败: " + e.message, "err"); }
+}
+
 /* ---------- 页签 ---------- */
 function switchTab(which) {
   $("#tabUnlabeled").classList.toggle("active", which === "unlabeled");
   $("#tabLabeled").classList.toggle("active", which === "labeled");
+  $("#tabUnrecognized").classList.toggle("active", which === "unrecognized");
   $("#panelUnlabeled").classList.toggle("hidden", which !== "unlabeled");
   $("#panelUnlabeledSide").classList.toggle("hidden", which !== "unlabeled");
   $("#panelLabeled").classList.toggle("hidden", which !== "labeled");
   $("#panelLabeledSide").classList.toggle("hidden", which !== "labeled");
+  $("#panelUnrecognized").classList.toggle("hidden", which !== "unrecognized");
   if (which === "labeled" && !state.selLabeled && state.labeled.length) {
     state.selLabeled = state.labeled[0].filename;
     renderGrid();
   }
+  if (which === "unrecognized") loadUnrecognized();
   if (which === "unlabeled") $("#labelInput").focus();
 }
 
 /* ---------- 事件绑定 ---------- */
 $("#dirSelect").addEventListener("change", async (e) => {
   state.dir = e.target.value || null;
-  state.idx = 0; state.selLabeled = null;
-  await Promise.all([loadUnlabeled(), loadLabeled()]);
+  state.idx = 0; state.selLabeled = null; state.unrecIdx = 0;
+  await Promise.all([loadUnlabeled(), loadLabeled(), loadUnrecognized()]);
   await refreshDirsCount();
 });
 $("#btnNewDir").addEventListener("click", createDir);
@@ -532,6 +678,7 @@ $("#modelSelect").addEventListener("change", e => setModel(e.target.value));
 $("#btnSaveCfg").addEventListener("click", saveConfig);
 $("#btnSave").addEventListener("click", saveLabel);
 $("#btnSkip").addEventListener("click", skipLabel);
+$("#btnUnrec").addEventListener("click", unrecognizeCurrent);
 $("#labelInput").addEventListener("keydown", e => { if (e.key === "Enter") saveLabel(); });
 $("#labelInput").addEventListener("input", e => {
   if (state.cfg.uppercase) e.target.value = e.target.value.toUpperCase();
@@ -541,8 +688,15 @@ $("#editInput").addEventListener("input", e => {
   if (state.cfg.uppercase) e.target.value = e.target.value.toUpperCase();
 });
 $("#btnModify").addEventListener("click", modifyLabel);
+$("#btnUnrecSave").addEventListener("click", saveUnrecognized);
+$("#btnUnrecReturn").addEventListener("click", returnUnrecognized);
+$("#unrecInput").addEventListener("keydown", e => { if (e.key === "Enter") saveUnrecognized(); });
+$("#unrecInput").addEventListener("input", e => {
+  if (state.cfg.uppercase) e.target.value = e.target.value.toUpperCase();
+});
 $("#tabUnlabeled").addEventListener("click", () => switchTab("unlabeled"));
 $("#tabLabeled").addEventListener("click", () => switchTab("labeled"));
+$("#tabUnrecognized").addEventListener("click", () => switchTab("unrecognized"));
 
 const dz = $("#dropZone");
 const fi = $("#fileInput");

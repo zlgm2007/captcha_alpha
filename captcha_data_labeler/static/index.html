@@ -98,6 +98,8 @@
     <button id="btnNewDir">新建目录</button>
     <button id="btnRefresh">刷新</button>
     <span class="spacer"></span>
+    <label>识别模型</label>
+    <select id="modelSelect"></select>
     <label>最小长度</label>
     <input type="number" id="minLenInput" min="1" max="32" style="width:64px">
     <label>最大长度</label>
@@ -161,6 +163,7 @@ const state = {
   dir: null, unlabeled: [], idx: 0,
   labeled: [], selLabeled: null,
   cfg: { length: 5, uppercase: true },
+  model: "",
 };
 
 /* ---------- API 封装 ---------- */
@@ -196,6 +199,35 @@ function fmtProg() {
 }
 
 /* ---------- 目录 / 配置 ---------- */
+async function loadModels() {
+  const d = await api("/api/models");
+  const sel = $("#modelSelect");
+  sel.innerHTML = '<option value="">默认（无模型）</option>';
+  for (const it of (d.models || [])) {
+    const o = document.createElement("option");
+    o.value = it.file;
+    o.textContent = it.label;
+    sel.appendChild(o);
+  }
+  // 恢复已保存的模型; 若已不在 models/ 则回退默认
+  const saved = state.model || "";
+  sel.value = (saved && d.models.some(x => x.file === saved)) ? saved : "";
+  state.model = sel.value;
+}
+
+async function setModel(file) {
+  state.model = file;
+  try {
+    const d = await post("/api/config", { model: file });
+    state.cfg = d.config;
+    setStatus("识别模型: " + $("#modelSelect").selectedOptions[0].textContent, "ok");
+  } catch (e) {
+    setStatus("切换模型失败: " + e.message, "err");
+  }
+  // 用新模型重新预填当前图
+  if (state.dir && state.unlabeled[state.idx]) prefillFor(state.unlabeled[state.idx]);
+}
+
 async function loadDirs() {
   const d = await api("/api/dirs");
   const sel = $("#dirSelect");
@@ -302,7 +334,7 @@ async function prefillFor(filename) {
   const dir = state.dir;
   if (!dir) return;
   try {
-    const d = await post("/api/prefill", { dir, filename });
+    const d = await post("/api/prefill", { dir, filename, model: state.model });
     if (state.dir !== dir) return;
     const files = state.unlabeled;
     if (files[state.idx] !== filename) return;
@@ -496,6 +528,7 @@ $("#dirSelect").addEventListener("change", async (e) => {
 $("#btnNewDir").addEventListener("click", createDir);
 $("#newDirInput").addEventListener("keydown", e => { if (e.key === "Enter") createDir(); });
 $("#btnRefresh").addEventListener("click", refreshAll);
+$("#modelSelect").addEventListener("change", e => setModel(e.target.value));
 $("#btnSaveCfg").addEventListener("click", saveConfig);
 $("#btnSave").addEventListener("click", saveLabel);
 $("#btnSkip").addEventListener("click", skipLabel);
@@ -537,6 +570,8 @@ dz.addEventListener("drop", async (e) => {
 /* ---------- 启动 ---------- */
 (async function init() {
   await loadConfig();
+  state.model = (state.cfg && state.cfg.model) || "";
+  await loadModels();
   try { await loadDirs(); } catch (e) { setStatus("初始化失败: " + e.message, "err"); }
   switchTab("unlabeled");
 })();

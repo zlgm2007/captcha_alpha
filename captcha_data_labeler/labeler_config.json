@@ -1,0 +1,6 @@
+{
+  "minLength": 4,
+  "maxLength": 6,
+  "uppercase": true,
+  "model": "apple_captcha.onnx"
+}

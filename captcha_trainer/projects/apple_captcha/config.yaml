@@ -17,8 +17,9 @@ Train:
     CNN: {NAME: ddddocr_beta}
     DROPOUT: 0.3
     LR: 0.001
+    NUM_WORKERS: 4
     OPTIMIZER: SGD
     SAVE_CHECKPOINTS_STEP: 200
-    TARGET: {Accuracy: 0.7, Cost: 0.05, Epoch: 20}
+    TARGET: {Accuracy: 0.85, Cost: 0.05, Epoch: 20}
     TEST_BATCH_SIZE: 32
     TEST_STEP: 50

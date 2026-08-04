@@ -1,3 +1,4 @@
+import functools
 import json
 import os
 import random
@@ -12,6 +13,33 @@ from PIL import Image, ImageEnhance, ImageFile
 from torch.utils.data import DataLoader, Dataset, TensorDataset
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
+
+
+def _collate(batch, transform):
+    """把样本列表组装成 batch(模块级函数, 供 DataLoader 多进程 worker pickle)."""
+    values = []
+    images = []
+    shapes = []
+    max_width = 0
+    for n, (img, seq) in enumerate(batch):
+        if img is None or seq is None:
+            continue
+        if len(seq) == 0:
+            continue
+        if max_width < img.size[0]:
+            max_width = img.size[0]
+        values.extend(seq)
+        images.append(img)
+        shapes.append(len(seq))
+    images_pad = []
+    for img in images:
+        img = torchvision.transforms.Pad((0, 0, int(max_width - img.size[0]), 0))(img)
+        if transform is not None:
+            img = transform(img)
+        images_pad.append(img)
+    images_pad = torch.stack(images_pad, dim=0)
+    return [images_pad, torch.tensor(values, dtype=torch.long),
+            torch.tensor(shapes, dtype=torch.long)]
 
 
 class LoadCache(Dataset):
@@ -164,34 +192,14 @@ class GetLoader:
         # 否则极小数据集下验证集 batch_size 保持过大, drop_last 会把整批丢弃导致空 loader
         if len(val_loader) < self.conf['Train']['BATCH_SIZE']:
             self.val_batch_size = len(val_loader)
+        # 多线程数据加载: NUM_WORKERS>0 时 CPU worker 并行读图+增强, 与 MPS 训练重叠,
+        # 减少主进程等数据的时间. val 无增强, 保持单线程即可.
+        num_workers = int(self.conf['Train'].get('NUM_WORKERS', 0) or 0)
         self.loaders = {
             'train': DataLoader(dataset=train_loader, batch_size=self.batch_size, shuffle=True, drop_last=True,
-                                num_workers=0, collate_fn=self.collate_to_sparse),
+                                num_workers=num_workers, collate_fn=functools.partial(_collate, transform=self.transform)),
             'val': DataLoader(dataset=val_loader, batch_size=self.val_batch_size, shuffle=True, drop_last=True,
-                              num_workers=0, collate_fn=self.collate_to_sparse),
+                              num_workers=0, collate_fn=functools.partial(_collate, transform=self.transform)),
         }
         del val_loader
         del train_loader
-
-    def collate_to_sparse(self, batch):
-        values = []
-        images = []
-        shapes = []
-        max_width = 0
-        for n, (img, seq) in enumerate(batch):
-            if img is None or seq is None:
-                continue
-            if len(seq) == 0: continue
-            if max_width < img.size[0]:
-                max_width = img.size[0]
-            values.extend(seq)
-            images.append(img)
-            shapes.append(len(seq))
-        images_pad = []
-        for img in images:
-            img = torchvision.transforms.Pad((0, 0, int(max_width - img.size[0]), 0))(img)
-            if self.transform is not None:
-                img = self.transform(img)
-            images_pad.append(img)
-        images_pad = torch.stack(images_pad, dim=0)
-        return [images_pad, torch.tensor(values, dtype=torch.long), torch.tensor(shapes, dtype=torch.long)]

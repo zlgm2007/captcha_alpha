@@ -14,6 +14,8 @@
 用法: python server.py [--data ../captcha_data] [--port 8765]
 浏览器打开 http://127.0.0.1:8765 即可使用.
 OCR 预填为可选功能: 需要 ../src 下的 preImg.py / ddddocrImg.py, 缺失时自动降级.
+识别模型可在界面下拉框选择: 「默认(无模型)」走内置 ddddocr 多策略;
+或选 ../models 下已导出的 onnx 专用模型(按原图识别, 自动带上同目录 charsets.json).
 """
 import argparse
 import base64
@@ -37,7 +39,11 @@ MAX_UPLOAD = 100 * 1024 * 1024   # 100MB(含 base64 膨胀)
 MAX_EXTRACT_TOTAL = 300 * 1024 * 1024  # 解压后总大小上限
 MAX_EXTRACT_FILE = 50 * 1024 * 1024    # 单文件大小上限
 
-DEFAULT_CONFIG = {"minLength": 4, "maxLength": 6, "uppercase": True}
+DEFAULT_CONFIG = {"minLength": 4, "maxLength": 6, "uppercase": True, "model": ""}
+
+# 仓库根目录下的 models/ (dddd_trainer 导出产物: onnx + charsets.json)
+MODELS_DIR = os.path.abspath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "models"))
 
 
 def _config_path():
@@ -70,6 +76,31 @@ def _safe_join(root, *parts):
     p = os.path.abspath(os.path.join(root_abs, *parts))
     if p != root_abs and not p.startswith(root_abs + os.sep):
         raise ValueError("非法路径")
+    return p
+
+
+# ---------- 识别模型 ----------
+
+def list_models():
+    """列出 ../models 下可用的 onnx 专用模型, 返回 [{file, label}]."""
+    if not os.path.isdir(MODELS_DIR):
+        return []
+    out = []
+    for f in sorted(os.listdir(MODELS_DIR)):
+        if f.lower().endswith(".onnx"):
+            out.append({"file": f, "label": os.path.splitext(f)[0]})
+    return out
+
+
+def resolve_model(file):
+    """把模型文件名安全解析为 models/ 下绝对路径; 非法/不存在抛 ValueError."""
+    if not file:
+        return ""
+    if os.path.basename(file) != file or not file.lower().endswith(".onnx"):
+        raise ValueError("非法模型名")
+    p = _safe_join(MODELS_DIR, file)
+    if not os.path.isfile(p):
+        raise ValueError(f"模型不存在: {file}")
     return p
 
 
@@ -220,15 +251,25 @@ def _load_ocr():
         return False
 
 
-def _ocr_prefill(path):
-    """返回 OCR 识别文本; 失败或不可用时返回空串."""
+def _ocr_prefill(path, model_path="", charsets_path=""):
+    """返回 OCR 识别文本; 失败或不可用时返回空串.
+
+    model_path 为空: 内置 ddddocr beta 对预处理灰度图识别(现有行为);
+    model_path 非空: 专用模型按训练格式(原始灰度等比缩放)识别, 喂原图路径,
+    与 src/api.py 保持一致(增强/提白/放大变体会拉低专用模型识别率).
+    """
     if not _load_ocr():
         return ""
     try:
         with _OCR["lock"]:
-            gray = _OCR["preprocess"](path, gamma=1.3, denoise=0,
-                                      bg_whiten=0, upscale=1)
-            text = _OCR["recognize"](gray, beta=True)
+            if model_path:
+                text = _OCR["recognize"](path, beta=True,
+                                         import_onnx_path=model_path,
+                                         charsets_path=charsets_path)
+            else:
+                gray = _OCR["preprocess"](path, gamma=1.3, denoise=0,
+                                          bg_whiten=0, upscale=1)
+                text = _OCR["recognize"](gray, beta=True)
         return (text or "").strip()
     except Exception:
         return ""
@@ -302,6 +343,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_labeled()
             elif path == "/api/image":
                 self._api_image()
+            elif path == "/api/models":
+                self._api_models()
             elif path == "/api/config":
                 self._send_json(self.cfg)
             else:
@@ -483,6 +526,10 @@ class Handler(BaseHTTPRequestHandler):
             f.write(blob)
         self._send_json({"ok": True, "filename": fname})
 
+    def _api_models(self):
+        """返回可用的识别模型列表(界面下拉框用)."""
+        self._send_json({"models": list_models()})
+
     def _api_prefill(self):
         body = self._read_json()
         name = body.get("dir", "")
@@ -491,7 +538,15 @@ class Handler(BaseHTTPRequestHandler):
         path = _safe_join(self.data_root, "raw", name, filename)
         if not os.path.isfile(path):
             raise ValueError("文件不存在")
-        text = _ocr_prefill(path)
+        model_file = body.get("model", "") or ""
+        if model_file:
+            model_path = resolve_model(model_file)
+            charsets_path = os.path.join(os.path.dirname(model_path), "charsets.json")
+            if not os.path.isfile(charsets_path):
+                raise ValueError(f"模型字符集不存在: {charsets_path}")
+        else:
+            model_path, charsets_path = "", ""
+        text = _ocr_prefill(path, model_path, charsets_path)
         self._send_json({"ok": True, "text": text})
 
     def _api_extract_archive(self):
@@ -517,7 +572,7 @@ class Handler(BaseHTTPRequestHandler):
     def _api_config(self):
         body = self._read_json()
         cfg = load_config()
-        for key in ("minLength", "maxLength", "uppercase"):
+        for key in ("minLength", "maxLength", "uppercase", "model"):
             if key in body:
                 cfg[key] = body[key]
         # 兼容旧版客户端传 length
@@ -531,6 +586,10 @@ class Handler(BaseHTTPRequestHandler):
             cfg["uppercase"] = bool(cfg["uppercase"])
         except (TypeError, ValueError):
             raise ValueError("配置参数非法")
+        # 校验 model: 空串(默认无模型) 或 models/ 下真实存在的 onnx 文件名
+        cfg["model"] = cfg.get("model", "") or ""
+        if cfg["model"]:
+            resolve_model(cfg["model"])  # 非法/不存在抛 ValueError
         save_config(cfg)
         self.server.cfg = cfg
         self._send_json({"ok": True, "config": cfg})

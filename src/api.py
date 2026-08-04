@@ -261,16 +261,17 @@ class CaptchaRecognizer:
                     candidates.append((f"{label}({'beta' if beta else 'std'})", text))
 
         # ---- 3. 自定义模型识别 ----
+        # 专用模型按训练数据格式训练(原始灰度、等比缩放至高64、/255), 只吃原图.
+        # 增强/提白/放大/自适应阈值等变体是给内置 ddddocr 调的, 喂给专用模型会
+        # 严重拉低识别率(实测 0/12 -> 仅原图 19/20), 故只对原始字节跑一次.
         if self.model_path:
-            for label, img in variants:
-                try:
-                    src = image_bytes if img is None else img
-                    text = ddddocr_recognize(src, import_onnx_path=self.model_path,
-                                             charsets_path=self.charsets_path)
-                    if text:
-                        candidates.append((f"{label}(自定义)", text))
-                except Exception:
-                    pass
+            try:
+                text = ddddocr_recognize(image_bytes, import_onnx_path=self.model_path,
+                                         charsets_path=self.charsets_path)
+                if text:
+                    candidates.append(("原图(自定义)", text))
+            except Exception:
+                pass
 
         # ---- 4. 自动推断长度 ----
         hint = length
@@ -299,11 +300,21 @@ class CaptchaRecognizer:
             return CaptchaResult(text="", candidates=[], confidence=0.0, length=0)
 
         # ---- 5. 择优 ----
-        expect_len = length if length is not None else hint
-        best = pick_best(candidates, expect_len=expect_len)
+        # 专用模型按训练集格式训练(原始灰度等比缩放), 在 hard case 上远强于内置
+        # ddddocr 多变体投票(实测 val 19/20 vs 内置近 0), 故自定义结果直接作为首选;
+        # 无自定义结果时退回多变体投票择优.
+        custom = next((t for l, t in candidates
+                       if "(自定义)" in l and re.fullmatch(r"[A-Za-z0-9]{2,}", t)),
+                      None)
+        if custom:
+            best = custom
+        else:
+            expect_len = length if length is not None else hint
+            best = pick_best(candidates, expect_len=expect_len)
 
-        # 噪点修复优先逻辑
-        if noise_blocks:
+        # 噪点修复优先逻辑: 仅对内置模型投票结果生效; 有专用模型结果时不覆盖
+        # (专用模型吃原图, 实测噪声块不影响其识别)
+        if noise_blocks and not custom:
             repair_result = next(
                 (t for label, t in candidates
                  if "噪点修复" in label and re.fullmatch(r"[A-Za-z0-9]{2,}", t)),

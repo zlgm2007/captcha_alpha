@@ -3,6 +3,7 @@ import os
 import random
 import time
 
+import torch
 import tqdm
 
 from configs import Config
@@ -48,18 +49,26 @@ class Train:
         else:
             self.gpu_id = -1
             self.device = Net.get_device(self.gpu_id)
-            logger.info("\nUSE CPU".format(self.gpu_id))
+            if self.device.type == 'mps':
+                logger.info("\nUSE MPS (Apple Silicon GPU)")
+            else:
+                logger.info("\nUSE CPU".format(self.gpu_id))
         logger.info("\nSearch for history checkpoints...")
         history_checkpoints = os.listdir(self.checkpoints_path)
+        newer_checkpoint = None
         if len(history_checkpoints) > 0:
-            history_step = 0
-            newer_checkpoint = None
+            history_step = -1
             for checkpoint in history_checkpoints:
                 checkpoint_name = checkpoint.split(".")[0].split("_")
-                if int(checkpoint_name[3]) > history_step:
+                try:
+                    checkpoint_step = int(checkpoint_name[3])
+                except (ValueError, IndexError):
+                    continue
+                if checkpoint_step > history_step:
                     newer_checkpoint = checkpoint
-                    history_step = int(checkpoint_name[3])
-            param, self.state_dict, self.optimizer= Net.load_checkpoint(
+                    history_step = checkpoint_step
+        if newer_checkpoint:
+            param, self.state_dict, self.optimizer = Net.load_checkpoint(
                 os.path.join(self.checkpoints_path, newer_checkpoint), self.device)
             self.epoch, self.step, self.lr = param['epoch'], param['step'], param['lr']
             self.epoch += 1
@@ -148,8 +157,18 @@ class Train:
                         if self.net.backbone.startswith("effnet"):
                             self.net.cnn.set_swish(memory_efficient=False)
                         self.net = self.net.eval().cpu()
-                        dynamic_ax = {'input1': {3: 'image_wdith'}, "output": {1: 'seq'}}
-                        self.net.export_onnx(self.net, dummy_input,
+                        # 导出 logits(T,B,C) 而非 argmax 索引(B,T): ddddocr 运行时按 logits
+                        # 做 argmax+CTC 解码, 若导出索引输出会被二次 argmax 得到乱码单字符.
+                        class ExportNet(torch.nn.Module):
+                            def __init__(self, net):
+                                super().__init__()
+                                self.net = net
+
+                            def forward(self, inputs):
+                                return self.net.get_features(inputs)
+
+                        dynamic_ax = {'input1': {3: 'image_wdith'}, "output": {0: 'seq'}}
+                        self.net.export_onnx(ExportNet(self.net), dummy_input,
                                              os.path.join(self.models_path, "{}_{}_{}_{}_{}.onnx".format(
                                                  self.project_name, str(accuracy), self.epoch, self.step,
                                                  time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime(self.now_time))))

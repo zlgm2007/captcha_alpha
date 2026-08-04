@@ -433,6 +433,36 @@ class TestShortcutFunction:
         assert isinstance(result, CaptchaResult)
 
 
+# ================================================================
+#  苹果专用接口测试
+# ================================================================
+
+class TestAppleShortcut:
+    """测试 api.recognize_apple() 苹果专用快捷函数(自动加载迁移模型)."""
+
+    APPLE_LABELED = os.path.join(
+        ROOT, "captcha_data", "labeled", "apple",
+        "HSNR_2026-08-03-19-28-28.png")
+
+    def test_apple_on_apple_image(self):
+        """苹果专用接口在真实苹果图上应正确识别."""
+        from api import recognize_apple
+        result = recognize_apple(self.APPLE_LABELED)
+        assert result.text == "HSNR"
+
+    def test_apple_gate_blocks_non_apple(self):
+        """苹果专用接口对非苹果图不应让专用模型垃圾结果覆盖内置识别."""
+        from api import recognize_apple
+        result = recognize_apple(image_path("test2.jpg"))
+        assert result.text == "kdqu"
+
+    def test_apple_returns_captcha_result(self):
+        """苹果专用接口应返回 CaptchaResult 类型."""
+        from api import recognize_apple, CaptchaResult
+        result = recognize_apple(image_path("test2.jpg"))
+        assert isinstance(result, CaptchaResult)
+
+
 if __name__ == "__main__":
     """支持 python test_captcha.py 直接运行(自动调用 pytest)."""
     try:

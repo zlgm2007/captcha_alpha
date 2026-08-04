@@ -23,3 +23,5 @@ __pycache__/
 **/checkpoints/
 **/checkpoints_backup/
 *.onnx
+# 例外：苹果验证码专用迁移模型（部署到仓库 models/，随代码入库）
+!models/apple_captcha.onnx

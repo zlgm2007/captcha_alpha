@@ -1,6 +1,6 @@
 Model:
-    CharSet: [' ', '9', P, H, V, W, T, B, C, A, M, U, Z, '7', '4', R, E, '1', O, '2',
-        G, '5', X, I, '3', F, Y, K, L, S, Q, J, D, N]
+    CharSet: [' ', I, U, '7', '4', M, C, '3', '5', T, '9', F, Y, A, '1', S, W, E,
+        G, Z, N, O, J, V, X, P, L, K, H, '2', B, R, D, Q]
     ImageChannel: 1
     ImageHeight: 64
     ImageWidth: -1
@@ -14,9 +14,9 @@ System:
     Val: 0.15
 Train:
     BATCH_SIZE: 32
-    CNN: {NAME: ddddocr}
+    CNN: {NAME: ddddocr_beta}
     DROPOUT: 0.3
-    LR: 0.01
+    LR: 0.001
     OPTIMIZER: SGD
     SAVE_CHECKPOINTS_STEP: 200
     TARGET: {Accuracy: 0.7, Cost: 0.05, Epoch: 20}

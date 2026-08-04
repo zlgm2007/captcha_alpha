@@ -73,14 +73,32 @@ class LoadCache(Dataset):
             return None, None
 
     def _augment(self, image):
-        """轻微数据增强(仅训练集): 仿射平移/旋转/缩放 + 亮度/对比度抖动, 缓解小样本过拟合."""
-        if random.random() < 0.95:
-            affine = torchvision.transforms.RandomAffine(degrees=4, translate=(0.03, 0.03), scale=(0.96, 1.04))
+        """数据增强(仅训练集): 几何仿射/透视 + 模糊 + 高斯噪声 + 亮度/对比度/锐度抖动.
+        数据全是通用模型认不出的难样本, 增强需更强才压得住过拟合."""
+        if random.random() < 0.9:
+            affine = torchvision.transforms.RandomAffine(degrees=8, translate=(0.05, 0.05), scale=(0.9, 1.1), shear=4)
             image = affine(image)
-        if random.random() < 0.95:
-            image = ImageEnhance.Brightness(image).enhance(random.uniform(0.9, 1.1))
-            image = ImageEnhance.Contrast(image).enhance(random.uniform(0.9, 1.1))
+        if random.random() < 0.35:
+            perspective = torchvision.transforms.RandomPerspective(distortion_scale=0.12, p=1.0)
+            image = perspective(image)
+        if random.random() < 0.3:
+            blur = torchvision.transforms.GaussianBlur(3, sigma=(0.1, 1.2))
+            image = blur(image)
+        if random.random() < 0.35:
+            image = self._add_noise(image)
+        if random.random() < 0.9:
+            image = ImageEnhance.Brightness(image).enhance(random.uniform(0.75, 1.25))
+            image = ImageEnhance.Contrast(image).enhance(random.uniform(0.75, 1.25))
+        if random.random() < 0.5:
+            image = ImageEnhance.Sharpness(image).enhance(random.uniform(0.5, 1.5))
         return image
+
+    def _add_noise(self, image):
+        """高斯加性噪声(灰度 L 模式, numpy 实现, 无新依赖)."""
+        import numpy as np
+        arr = np.asarray(image).astype(np.float32)
+        arr = np.clip(arr + np.random.normal(0, 8, arr.shape), 0, 255).astype(np.uint8)
+        return Image.fromarray(arr, mode=image.mode)
 
 
 class GetLoader:

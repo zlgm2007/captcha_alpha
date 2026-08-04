@@ -140,6 +140,11 @@ class EffNetV2(nn.Module):
         x = self.features(x)
         return x
 
+    def set_swish(self, memory_efficient=True):
+        """兼容 dddd_trainer 导出路径(train.py:148 对 effnet 骨干调用).
+        本实现使用标准 SiLU, 无 memory-efficient 变体, 故为 no-op."""
+        pass
+
     def _initialize_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):

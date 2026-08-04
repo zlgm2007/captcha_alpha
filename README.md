@@ -48,20 +48,30 @@ captcha_alpha/                            # 验证码识别与训练工具（仓
 ├── captcha_data/
 │   ├── raw/                            # 待标注图片目录
 │   └── labeled/                        # 标注输出目录（label_hash.png）
+├── captcha_data_labeler/               # 独立标注工具（Web + stdlib 零依赖，server.py + static/）
 ├── captcha_trainer/                    # dddd_trainer 训练框架（已适配 Python 3.12 + 新版 torch）
 │   ├── app.py                          # 训练 CLI（create / cache / train）
 │   ├── configs/                        # 全局配置基类
 │   ├── nets/backbone/                  # 可选骨干网络（ddddocr / efficientnet / mobilenet）
 │   ├── utils/                          # 缓存 / 加载 / 训练工具
-│   ├── projects/douyin_captcha/        # 训练项目（已配置）
+│   ├── projects/douyin_captcha/        # 训练项目：常规验证码（小模型 CPU/MPS 快速训练）
 │   │   ├── config.yaml                 # 项目配置（GPU/灰度/高度/宽度/CRNN）
 │   │   ├── cache/                      # 标注缓存（训练时自动生成）
 │   │   ├── checkpoints/                # 训练 checkpoint（训练时自动生成）
 │   │   └── models/                     # 导出模型 onnx + charsets.json（训练时自动生成）
+│   ├── projects/apple_captcha/         # 训练项目：难样本（迁移学习 ddddocr 权重微调）
+│   │   ├── config.yaml                 # 项目配置（backbone/分辨率/增强等难样本参数）
+│   │   ├── cache/                      # 标注缓存（cache.train.tmp / cache.val.tmp）
+│   │   ├── checkpoints/                # 训练 checkpoint（每 200 step 保存）
+│   │   ├── checkpoints_backup/         # 旧 checkpoint 归档（跨数据集重训前移入）
+│   │   ├── models/                     # 导出模型 onnx + charsets.json
+│   │   └── train_transfer.log          # 训练日志（MPS 加速，最新进度以它为准）
+│   ├── transfer_pretrained.py          # 迁移学习：把 common.onnx 权重转成 torch checkpoint
 │   └── requirements.txt                # 依赖清单（已适配 Python 3.12 + 新版 torch）
 ├── models/                             # 训练产物存放目录（onnx + charsets.json）
 └── doc/
     ├── captcha-recognition-optimization.md  # 困难样例优化方案（根因诊断/参数扫描/投票）
+    ├── captcha-training-optimization.md     # 训练优化方案（难样本：迁移学习 + 推理链路修复）
     ├── ai-agent-integration.md              # AI Agent 接入指南（MCP Server / WorkBuddy 技能）
     ├── apply-trained-model.md               # 应用专用训练模型指南（--model / CaptchaRecognizer 用法）
     └── images/验证码识别解决方案流程.png       # 方案流程图
@@ -244,7 +254,15 @@ recognizer = CaptchaRecognizer(model_path="models/custom.onnx")
 
 # 方式 2: 快捷函数（全局单例，适合一次性调用）
 result = recognize("images/test.png")
+
+# 方式 3: 苹果验证码专用快捷函数（自动加载 models/apple_captcha.onnx，
+#         带 gap_min 置信门槛：非苹果图自动退回内置识别）
+from api import recognize_apple
+result = recognize_apple("captcha_data/labeled/apple/HSNR_2026-08-03-19-28-28.png")
+print(result.text)  # "HSNR"
 ```
+
+**两个对外快捷接口**：`recognize(image)` 通用识别（无专用模型，内置 ddddocr 多策略投票）；`recognize_apple(image)` 苹果验证码专用（自动加载 `models/apple_captcha.onnx`，自定义结果经 `gap_min≥0.08` 置信门槛后优先，对非苹果图自动退回内置投票）。底层类 `CaptchaRecognizer(model_path=...)` 仍保留，供使用其他自定义模型或多实例场景。
 
 `CaptchaResult` 结构体：
 
@@ -258,7 +276,7 @@ result = recognize("images/test.png")
 
 ### 7. 接入 AI Agent（WorkBuddy / Claude）
 
-项目通过 MCP Server（`mcp/mcp_server.py`）将验证码识别暴露为 AI Agent 可直接调用的工具（`recognize_captcha` / `recognize_captcha_base64` / `recognize_captcha_batch`），并附 WorkBuddy 技能包。一键安装、手动注册、工具说明与调用流程见 **[doc/ai-agent-integration.md](doc/ai-agent-integration.md)**。
+项目通过 MCP Server（`mcp/mcp_server.py`）将验证码识别暴露为 AI Agent 可直接调用的工具（`recognize_captcha` / `recognize_captcha_base64` / `recognize_captcha_batch` / `recognize_apple_captcha`），并附 WorkBuddy 技能包。一键安装、手动注册、工具说明与调用流程见 **[doc/ai-agent-integration.md](doc/ai-agent-integration.md)**。
 
 ---
 
@@ -298,17 +316,19 @@ python src/label_tool.py --raw captcha_data/raw --labeled captcha_data/labeled -
 ```bash
 cd captcha_trainer
 python app.py cache douyin_captcha ../captcha_data/labeled   # 生成缓存+字符集
-python app.py train douyin_captcha                            # CPU 训练
+python app.py train douyin_captcha                            # 训练（MPS 自动启用）
 ```
 
 - `cache` 自动从所有标注收集字符集（索引 0 为 CTC blank）并切 3% 做验证集
 - `train` 训练至 `Accuracy ≥ 0.97` 后自动导出 `projects/douyin_captcha/models/*.onnx` + `charsets.json`
 - checkpoint 每 2000 step 保存，中断后重跑 `train` 会自动续训
-- 本机 CPU 训练：小模型 + 数百样本约 10 分钟 ~ 1 小时
+- **MPS（Apple Silicon GPU）自动加速**：`GPU: false` 且 MPS 可用时自动走 MPS，无需改配置。实测 M4 Pro 上约 **0.48s/步**（2000 步约 18 分钟），比单线程 CPU 快约 27 倍（`utils/train.py` 启动日志会打印 `USE MPS`）
 
 > 已配置好的 `projects/douyin_captcha/config.yaml`：`GPU: false`、灰度图（`ImageChannel: 1`）、高度 64（`ImageHeight: 64`，16 的倍数）、宽度自适应（`ImageWidth: -1`）、CRNN（`Word: false`）、backbone 用 `ddddocr`。
 >
 > 提示：已验证极小数据集（如 2 张）也能完整跑通 缓存→训练→导出→加载 全流程，适合先验证管线；但样本太少时模型无泛化能力、准确率无意义。真实训练建议 ≥300 张。
+
+> **难样本（通用模型全认不出的 bad case）训练**：如果标注数据全是通用 ddddocr 认不出的困难图，小模型 + 弱增强会过拟合（训练 loss→0、验证 acc 卡 0）。试过更强骨干 + 高分辨率 + 强化增强（`effnetv2_s` + `ImageHeight: 160`）**仍然过拟合**。最终方案是**迁移学习**：用 ddddocr 通用模型 `common.onnx` 权重初始化骨干 + BiLSTM（`transfer_pretrained.py` 转 checkpoint），仅微调输出层，苹果难样本验证集达 **71%**（从零训练仅 3–6%）。已配好示例项目 `projects/apple_captcha/`（`ddddocr_beta` 骨干 + `ImageHeight: 64` + LR 0.001），完整方案（根因 / 迁移转换 / 推理链路修复 / 验证）见 **[doc/captcha-training-optimization.md](doc/captcha-training-optimization.md)**。
 
 ### 4. 使用训练好的模型
 
@@ -318,7 +338,22 @@ python app.py train douyin_captcha                            # CPU 训练
 python src/main.py images/test.png --model models/<模型名>.onnx
 ```
 
-`--model` 模式下会同时展示通用模型与自定义模型的识别结果并择优。不传 `--model` 时行为不变，仍使用内置 ddddocr。
+> `charsets.json` 放在 **onnx 同目录**时自动加载，只需传 `--model` 即可；字符集必须与模型配套，否则解码乱码。
+
+`--model` 模式下会同时展示通用模型与自定义模型的识别结果，**自定义结果优先**（专用模型针对该类验证码训练，远强于内置多变体投票）。但自定义结果需通过**置信门槛**：模型逐时间步 softmax 最高两类的差距最小值 `gap_min ≥ 0.08` 时才采用（这类图与训练集同分布，模型确信）；对非该类别图（如普通验证码）模型会摇摆、`gap_min` 低，此时自动退回内置多变体投票，避免专用模型把垃圾结果强加给无关图。不传 `--model` 时行为不变，仍使用内置 ddddocr。
+
+**苹果验证码实例**（迁移模型已就位，用短命令即可）：
+
+```bash
+python src/main.py captcha_data/labeled/apple/HSNR_2026-08-03-19-28-28.png --model models/apple_captcha.onnx
+```
+
+```
+  原图(自定义)         : HSNR
+验证码    : HSNR
+```
+
+> 注意：`models/apple_captcha.onnx` 现为迁移学习模型（8-04 更新，验证集约 71%）。此前 8-03 的旧过拟合模型已覆盖，勿再使用旧产物。
 
 > **应用专用模型的完整用法（CLI 参数 / Python API `CaptchaRecognizer` / 注意事项与排查）详见 [doc/apply-trained-model.md](doc/apply-trained-model.md)**。
 

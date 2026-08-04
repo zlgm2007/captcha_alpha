@@ -3,7 +3,8 @@ import json
 from .backbone import *
 import torch
 
-torch.set_num_threads(1)
+# M4 Pro 多核/GPU: 提高 CPU 线程数(数据变换/CTC loss 等 CPU 侧并行), 主计算走 MPS
+torch.set_num_threads(8)
 
 import numpy as np
 
@@ -17,6 +18,7 @@ class Net(torch.nn.Module):
 
         self.backbones_list = {
             "ddddocr": DdddOcr,
+            "ddddocr_beta": DdddOcrBeta,
             "effnetv2_l": effnetv2_l,
             "effnetv2_m": effnetv2_m,
             "effnetv2_xl": effnetv2_xl,
@@ -190,7 +192,10 @@ class Net(torch.nn.Module):
     @staticmethod
     def get_device(gpu_id):
         if gpu_id == -1:
-            device = torch.device('cpu'.format(str(gpu_id)))
+            if torch.backends.mps.is_available():
+                device = torch.device('mps')
+            else:
+                device = torch.device('cpu'.format(str(gpu_id)))
         else:
             device = torch.device('cuda:{}'.format(str(gpu_id)))
         return device

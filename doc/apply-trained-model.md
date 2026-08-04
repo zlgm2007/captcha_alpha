@@ -46,7 +46,7 @@ python src/main.py <图片> --model models/apple_captcha.onnx \
 | `--binary` | 仅用二值化预处理（干扰线严重的验证码） |
 | `-o, --output` | 预处理图保存路径 |
 
-**`--model` 模式的行为**：`src/main.py` 会同时展示**通用模型**与**自定义模型**的全部候选，再统一择优。候选标签中带 `(自定义)` 的即为专用模型输出。不传 `--model` 时行为不变，仍只用内置 ddddocr。
+**`--model` 模式的行为**：`src/main.py` 会同时展示**通用模型**与**自定义模型**的全部候选。候选标签中带 `(自定义)` 的即为专用模型输出。**专用模型结果优先**（按该类验证码专门训练，实测远强于内置多变体投票），但需过**置信门槛**：模型逐时间步 softmax 最高两类的差距最小值 `gap_min ≥ 0.08` 才采用——低 `gap_min` 说明模型对该图摇摆（多为非本类别图），此时自动退回内置 ddddocr 的多变体择优，避免专用模型把垃圾结果覆盖原本正确的识别（实测修复了 img_0001/test2.jpg 等非苹果图的回归）。不传 `--model` 时行为不变，仍只用内置 ddddocr。
 
 ---
 
@@ -84,7 +84,7 @@ result = recognize(
 
 ## 五、示例：应用苹果验证码模型
 
-项目已有一个训练产物示例：`models/apple_captcha.onnx` + `captcha_trainer/projects/apple_captcha/models/charsets.json`（针对 `captcha_data/labeled/apple/` 那批"问题验证码"训练）。
+迁移学习产物示例：`models/apple_captcha_0.75_105_1150_2026-08-04-14-57-19.onnx` + `captcha_trainer/projects/apple_captcha/models/charsets.json`（针对 `captcha_data/labeled/apple/` 那批"问题验证码"迁移微调，验证集 71%）。**将模型拷到 `models/` 并重命名后**，charsets 默认取 onnx 同目录：
 
 ```bash
 # 对一张苹果验证码图应用专用模型
@@ -95,8 +95,8 @@ python src/main.py captcha_data/raw/apple/2026-07-31-16-31-00.png \
 输出会同时列出通用与专用模型的候选：
 
 ```
-  原图(beta)        : ywc        # 通用模型：几乎读不了（此类图仅 3% 正确率）
-  原图(自定义)       : VW9D       # 专用模型：能读出字符（大写字母+数字）
+  增强(beta)        : vbyn       # 通用模型：难样本几乎读不了
+  原图(自定义)       : WBYN       # 专用模型：能读出字符（大写字母+数字）
 ```
 
 ---
@@ -106,11 +106,14 @@ python src/main.py captcha_data/raw/apple/2026-07-31-16-31-00.png \
 1. **`charsets.json` 必须与 onnx 配套**：字符集不一致会解码乱码。同一次训练导出的两个文件务必一起使用。
 2. **模型是"特化"的**：专用模型只认训练时那一类验证码，且只能输出训练字符集内的字符（大写/小写/数字取决于训练数据）。拿苹果模型去认抖音验证码没有意义。
 3. **样本量决定可用性**：
-   - `< 300 张`：模型**记忆训练集**（对见过的图 100%，但**不泛化**到新图）——验证码每次随机生成，生产环境几乎不会出现完全相同的图，记忆型模型实际用不上。
+   - `< 300 张`：从零训练只会**记忆训练集**（对见过的图 100%，但**不泛化**到新图）——验证码每次随机生成，生产环境几乎不会出现完全相同的图，记忆型模型实际用不上。
    - `≥ 300 张`：才具备对**新图**的泛化识别能力，才是真正可用的专用模型。
+   - **难样本（bad case）优先迁移学习**：样本全是通用模型认不出的困难图时，从零训练即使 300+ 张也过拟合（见 [doc/captcha-training-optimization.md](captcha-training-optimization.md)）。改用 ddddocr 通用权重初始化后，同样的 358 张即可泛化（苹果模型验证集 71%）。
 4. **训练集外的困难样例仍需专用模型**：如 `images/bc_0001.png`（`ctyx`，y/x 粘连），通用模型能力已达极限，只能靠专用模型解决。
 5. **MCP Server 暂不支持自定义模型**：`mcp/mcp_server.py` 的 `recognize_captcha` 等工具固定使用内置 ddddocr。如需在 AI Agent 里用专用模型，请直接走 CLI / Python API。
-6. **输入归一化已对齐**：训练框架已移除 `Normalize`，与 ddddocr 运行时 `/255` 归一化保持一致，导出的 onnx 可直接被本仓库 `--model` / `CaptchaRecognizer` 正常加载。
+6. **导出与推理链路已对齐**：
+   - 训练框架已移除 `Normalize`，ddddocr 运行时对自定义模型只做灰度 + 等比缩放至高 64 + `/255`，与训练一致 → 专用模型**只吃原图**，增强/提白/放大等变体仅用于内置模型（喂给专用模型会大幅拉低识别率）。
+   - 导出的 onnx 输出 **logits `(T,B,C)`**（而非 argmax 索引）：新版 ddddocr 运行时按 logits 做 argmax+CTC 解码，若导出索引输出会被二次 argmax 得到单字符乱码（此坑已修，见训练优化文档 4.5）。
 
 ---
 
@@ -118,13 +121,14 @@ python src/main.py captcha_data/raw/apple/2026-07-31-16-31-00.png \
 
 | 现象 | 排查 |
 | --- | --- |
-| 输出乱码 / 全是同一字符 | `charsets.json` 与 onnx 不配套，或字符集没找到（确认路径） |
+| 输出乱码 / 全是同一字符 | `charsets.json` 与 onnx 不配套，或字符集没找到（确认路径）；或导出的 onnx 是 argmax 索引而非 logits（新版 ddddocr 会二次 argmax，需用 `utils/train.py` 的 logits 导出重新导出） |
 | 结果不在字符集内 | 训练时标注含字符集外字符，重新 cache 生成字符集 |
-| 模型对新图全错 | 样本太少过拟合，需采集 ≥300 张重训 |
+| 模型对新图全错 | 样本太少过拟合，需采集 ≥300 张重训；难样本优先迁移学习（见训练优化文档） |
 | 加了 `--model` 却没看到 `(自定义)` 候选 | 确认 onnx/charsets 路径存在、可读 |
 
 ---
 
 相关文档：
 - [README 三、训练专用模型](../README.md#三训练专用模型提高识别率) —— 数据准备 → 标注 → 训练 → 导出的完整流程
+- [doc/captcha-training-optimization.md](captcha-training-optimization.md) —— 难样本训练的优化方案（迁移学习 ddddocr 权重微调，含推理链路修复）
 - [doc/captcha-recognition-optimization.md](captcha-recognition-optimization.md) —— 不训练时的预处理增强与多策略择优方案

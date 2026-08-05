@@ -106,7 +106,7 @@ class RecognizerAPI:
         model_path = rec._resolve_model(body.get("model", ""))
         from api import CaptchaError
         try:
-            result = rec._recognize(blob, model_path)
+            result = rec._recognize(blob, model_path, bool(body.get("no_fallback")))
         except CaptchaError as e:
             raise ValueError(f"图片无效: {e}")
         except Exception as e:

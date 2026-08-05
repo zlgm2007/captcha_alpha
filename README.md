@@ -312,13 +312,14 @@ recognizer = CaptchaRecognizer(model_path="models/custom.onnx")
 result = recognize("images/test.png")
 
 # 方式 3: 苹果验证码专用快捷函数（自动加载 models/apple_captcha.onnx，
-#         带 gap_min 置信门槛：非苹果图自动退回内置识别）
+#         默认只用苹果模型自身结果，不回退内置识别；
+#         传 model_only=False 恢复 gap 门槛回退）
 from api import recognize_apple
 result = recognize_apple("captcha_data/labeled/apple/HSNR_2026-08-03-19-28-28.png")
 print(result.text)  # "HSNR"
 ```
 
-**两个对外快捷接口**：`recognize(image)` 通用识别（无专用模型，内置 ddddocr 多策略投票）；`recognize_apple(image)` 苹果验证码专用（自动加载 `models/apple_captcha.onnx`，自定义结果经 `gap_min≥0.08` 置信门槛后优先，对非苹果图自动退回内置投票）。底层类 `CaptchaRecognizer(model_path=...)` 仍保留，供使用其他自定义模型或多实例场景。
+**两个对外快捷接口**：`recognize(image)` 通用识别（无专用模型，内置 ddddocr 多策略投票；传 `no_fallback`/`model_only` 可让已选模型不回退，未选模型时仍走内置）；`recognize_apple(image)` 苹果验证码专用（自动加载 `models/apple_captcha.onnx`，**默认只用苹果模型自身结果、不回退**；传 `model_only=False` 恢复旧行为：结果经 `gap_min≥0.08` 置信门槛后优先，对非苹果图自动退回内置投票）。底层类 `CaptchaRecognizer(model_path=...)` 仍保留，供使用其他自定义模型或多实例场景。
 
 `CaptchaResult` 结构体：
 

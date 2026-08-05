@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>模型训练</title>
+<style>
+  :root { --bg:#f0f2f5; --panel:#fff; --border:#d9dde3; --text:#1f2328;
+          --muted:#6b7280; --accent:#2f6feb; --ok:#1a7f37; --err:#d1242f; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 13px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+         background: var(--bg); color: var(--text); padding: 14px 16px; }
+  header { background: var(--panel); border:1px solid var(--border); border-radius:10px;
+           padding: 12px 14px; margin-bottom: 14px; }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  label { color: var(--muted); font-size: 12px; }
+  select, input[type=text], input[type=number] {
+    padding: 5px 7px; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 13px; background: #fff; color: var(--text); }
+  input[type=number] { width: 84px; }
+  button { padding: 6px 14px; border:1px solid var(--border); border-radius:6px;
+           background:#fff; cursor:pointer; font-size:13px; color:var(--text); }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color:#fff; }
+  button.primary:hover { background:#1f5fd0; color:#fff; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  button.danger { background: var(--err); border-color: var(--err); color:#fff; }
+  button.danger:hover { background:#a91d27; color:#fff; }
+  .cols { display:flex; gap:14px; align-items:flex-start; flex-wrap:wrap; }
+  .card { background: var(--panel); border:1px solid var(--border); border-radius:10px;
+          padding:14px; }
+  .card h2 { font-size:14px; margin-bottom:10px; color:#24292f; }
+  .params { width: 340px; flex:none; }
+  .monitor { flex:1; min-width:360px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:8px 12px; }
+  .grid label { display:flex; flex-direction:column; gap:3px; }
+  .grid input { width:100%; }
+  .actions { margin-top:12px; display:flex; gap:8px; align-items:center; }
+  #stateTag { font-weight:700; padding:3px 10px; border-radius:20px; font-size:12px; }
+  #stateTag.idle { background:#eaeef2; color:#57606a; }
+  #stateTag.running, #stateTag.preparing { background:#ddf4ff; color:#0969da; }
+  #stateTag.done { background:#dafbe1; color:#1a7f37; }
+  #stateTag.stopped { background:#fff8c5; color:#9a6700; }
+  #stateTag.error { background:#ffebe9; color:#d1242f; }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(100px,1fr));
+           gap:8px; margin:10px 0; }
+  .stat { background:#f6f8fa; border-radius:8px; padding:8px 10px; }
+  .stat b { display:block; font-size:16px; }
+  .stat span { color:var(--muted); font-size:11px; }
+  #progWrap { height:10px; background:#eaeef2; border-radius:6px; overflow:hidden; margin-bottom:6px; }
+  #progBar { height:100%; width:0%; background:var(--accent); transition:width .4s; }
+  canvas { width:100%; height:150px; background:#fff; border:1px solid var(--border);
+           border-radius:8px; margin-bottom:8px; }
+  pre { background:#1f2328; color:#c9d1d9; border-radius:8px; padding:10px; font-size:11px;
+        height:160px; overflow:auto; white-space:pre-wrap; word-break:break-all; }
+  .hint { color:var(--muted); font-size:11px; margin-top:6px; }
+  .ok { color:var(--ok); } .err { color:var(--err); }
+  #ckptList { font-size:11px; color:var(--muted); margin-top:8px; max-height:120px; overflow:auto; }
+  .publish { margin-top:14px; }
+  .publish .row { margin-top:10px; }
+  #exportSel { min-width:300px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <label>训练项目
+      <select id="projSel"></select>
+    </label>
+    <label>数据批次
+      <select id="batchSel"></select>
+    </label>
+    <button id="btnPrepare" class="primary">准备数据</button>
+    <label><input type="checkbox" id="chkTransfer" checked> 迁移学习初始化</label>
+    <label><input type="checkbox" id="chkReset"> 清空旧 checkpoint</label>
+    <span id="dataInfo" class="hint"></span>
+  </div>
+</header>
+
+<div class="cols">
+  <section class="card params">
+    <h2>核心超参数</h2>
+    <div class="grid">
+      <label>学习率 LR <input type="number" id="lr" step="0.0001"></label>
+      <label>Batch Size <input type="number" id="batch_size"></label>
+      <label>优化器 <select id="optimizer"><option>SGD</option><option>Adam</option></select></label>
+      <label>Dropout <input type="number" id="dropout" step="0.05"></label>
+      <label>验证步长 TEST_STEP <input type="number" id="test_step"></label>
+      <label>存档步长 SAVE_STEP <input type="number" id="save_step"></label>
+      <label>加载线程 NUM_WORKERS <input type="number" id="num_workers"></label>
+      <label>骨干 CNN <select id="cnn">
+        <option>ddddocr_beta</option><option>ddddocr</option>
+        <option>effnetv2_s</option><option>effnetv2_m</option><option>mobilenetv3_s</option>
+      </select></label>
+      <label>目标准确率 <input type="number" id="target_acc" step="0.01"></label>
+      <label>最小 Epoch <input type="number" id="target_epoch"></label>
+      <label>目标 Loss <input type="number" id="target_cost" step="0.01"></label>
+      <label>验证集比例 Val <input type="number" id="val" step="0.01"></label>
+      <label>输入高度 <input type="number" id="image_height"></label>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label>训练步数上限 MAX_STEP <input type="number" id="max_steps"></label>
+    </div>
+    <p class="hint">MAX_STEP 为续训目标总步数(含已训步数), ETA 依此推算。NUM_WORKERS 建议 0(后台线程内多进程加载易冲突)。</p>
+    <div class="actions">
+      <button id="btnStart" class="primary">开始训练</button>
+      <button id="btnStop" class="danger" disabled>停止训练</button>
+      <span id="stateTag" class="idle">空闲</span>
+    </div>
+  </section>
+
+  <section class="card monitor">
+    <h2>训练监控</h2>
+    <div id="progWrap"><div id="progBar"></div></div>
+    <div class="stats">
+      <div class="stat"><b id="stStep">0</b><span>step</span></div>
+      <div class="stat"><b id="stEpoch">0</b><span>epoch</span></div>
+      <div class="stat"><b id="stLoss">-</b><span>loss</span></div>
+      <div class="stat"><b id="stVal">-</b><span>val_acc(批)</span></div>
+      <div class="stat"><b id="stSps">-</b><span>steps/s</span></div>
+      <div class="stat"><b id="stEta">-</b><span>剩余时间 ETA</span></div>
+      <div class="stat"><b id="stElapsed">0s</b><span>已用时</span></div>
+      <div class="stat"><b id="stFinal">-</b><span>全验证集准确率</span></div>
+    </div>
+    <canvas id="chart"></canvas>
+    <pre id="logBox"></pre>
+  </section>
+</div>
+
+<section class="card publish">
+  <h2>模型导出与发布</h2>
+  <div class="row">
+    <label>导出/发布项目</label>
+    <button id="btnExport">从最新 checkpoint 导出 ONNX</button>
+    <span id="exportMsg"></span>
+  </div>
+  <div class="row">
+    <label>已导出模型</label>
+    <select id="exportSel"></select>
+    <button id="btnPublish" class="primary">发布到主项目 models/（替换 apple_captcha.onnx）</button>
+    <span id="pubMsg"></span>
+  </div>
+  <div id="ckptList"></div>
+</section>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const enc = encodeURIComponent;
+const API = "/train/api";
+const post = (path, body) => fetch(API + path, {
+  method: "POST", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body || {}),
+}).then(r => r.json());
+const get = (path) => fetch(API + path).then(r => r.json());
+
+let curState = "idle";
+let busy = false;
+
+/* ---------- 表单 <-> hyperparams ---------- */
+const FIELDS = ["lr","batch_size","optimizer","dropout","test_step","save_step",
+                "num_workers","cnn","target_acc","target_epoch","target_cost",
+                "val","image_height"];
+function readHp() {
+  const hp = {};
+  FIELDS.forEach(k => {
+    const el = $(k);
+    if (el.type === "checkbox") hp[k] = el.checked;
+    else if (el.tagName === "SELECT") hp[k] = el.value;
+    else if (el.value !== "") hp[k] = el.value;
+  });
+  return hp;
+}
+function fillForm(c) {
+  FIELDS.forEach(k => { if (c[k] !== undefined) $(k).value = c[k]; });
+  const info = $(c.max_steps ? "max_steps" : "dataInfo");
+  $("dataInfo").textContent = c.data_path
+    ? `数据: ${c.data_count} 张 · 字符集 ${c.charset_len} 个 · ${c.data_path}` : "";
+  if (c.data_count) $("dataInfo").textContent = `数据: ${c.data_count} 张 · 字符集 ${c.charset_len} 个`;
+}
+async function reloadConfig() {
+  const proj = $("projSel").value;
+  const c = await get("/config?project=" + enc(proj));
+  fillForm(c);
+  const ck = await get("/checkpoints?project=" + enc(proj));
+  const list = $("ckptList");
+  if (ck.checkpoints && ck.checkpoints.length) {
+    const n = ck.checkpoints[0];
+    $("max_steps").value = n.step + 300;
+    list.textContent = `最新 checkpoint: ${n.file} (epoch ${n.epoch}, step ${n.step}) · 共 ${ck.checkpoints.length} 个`;
+  } else {
+    $("max_steps").value = 300;
+    list.textContent = "暂无 checkpoint（请先准备数据；若勾选迁移学习将生成 0_0 起点）";
+  }
+  loadExported(proj);
+}
+
+/* ---------- 已导出模型列表 ---------- */
+async function loadExported(proj) {
+  const r = await get("/exported?project=" + enc(proj || $("projSel").value));
+  const sel = $("exportSel");
+  sel.innerHTML = "";
+  (r.models || []).forEach(f => {
+    const o = document.createElement("option");
+    o.value = f; o.textContent = f;
+    sel.appendChild(o);
+  });
+}
+
+/* ---------- 图表 ---------- */
+function drawChart(metrics, valPoints) {
+  const cv = $("chart"), ctx = cv.getContext("2d");
+  const W = cv.clientWidth, H = cv.clientHeight;
+  if (!W || !H) return;
+  cv.width = W; cv.height = H;
+  ctx.clearRect(0,0,W,H);
+  const pad = {l:36, r:10, t:10, b:22};
+  if (!metrics.length) { return; }
+  const avg = metrics.map(m => m.avg_loss).filter(v => v !== undefined && v !== null);
+  const vals = valPoints.map(v => v.acc);
+  const hasVal = vals.length > 0;
+  const maxLoss = Math.max(...avg.slice(0, 200).map(v => v), 0.01);
+  const maxV = hasVal ? Math.max(1, ...vals) : 1;
+  const steps = metrics.map(m => m.step);
+  const xMax = Math.max(...steps), xMin = Math.min(...steps, 0);
+  const X = s => pad.l + (s - xMin) / Math.max(1, xMax - xMin) * (W - pad.l - pad.r);
+  const YL = v => pad.t + (1 - Math.min(1, v / maxLoss)) * (H - pad.t - pad.b);
+  const YV = v => pad.t + (1 - v / maxV) * (H - pad.t - pad.b);
+  // 网格
+  ctx.strokeStyle = "#eaeef2"; ctx.fillStyle = "#6b7280"; ctx.font = "10px sans-serif";
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.t + i / 4 * (H - pad.t - pad.b);
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+    ctx.fillText((maxLoss * (1 - i / 4)).toFixed(2), 2, y + 3);
+  }
+  // loss 曲线
+  if (avg.length >= 2) {
+    ctx.strokeStyle = "#2f6feb"; ctx.lineWidth = 1.5; ctx.beginPath();
+    metrics.forEach((m, i) => {
+      const x = X(m.step), y = YL(m.avg_loss);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+  // val_acc 曲线(单独缩放, 用右侧提示)
+  if (hasVal && vals.length >= 2) {
+    ctx.strokeStyle = "#1a7f37"; ctx.lineWidth = 1.5; ctx.setLineDash([4,3]);
+    ctx.beginPath();
+    valPoints.forEach((v, i) => {
+      const x = X(v.step), y = YV(v.acc);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#1a7f37";
+    ctx.fillText("val_acc(" + vals[vals.length-1].toFixed(2) + ")", pad.l, H - 8);
+  }
+  ctx.fillStyle = "#6b7280";
+  ctx.fillText("loss(" + (avg.length ? avg[avg.length-1].toFixed(3) : "-") + ")", pad.l, pad.t + 4);
+}
+
+/* ---------- 状态渲染 ---------- */
+function renderStatus(s) {
+  curState = s.state;
+  const tag = $("stateTag");
+  tag.className = s.state; tag.textContent = s.state;
+  if (s.reason) tag.title = s.reason;
+  $("btnStart").disabled = s.state === "running" || s.state === "preparing";
+  $("btnStop").disabled = s.state !== "running";
+  $("btnPrepare").disabled = busy || s.state === "running" || s.state === "preparing";
+  const p = s.progress || {};
+  $("stStep").textContent = p.step || 0;
+  $("stEpoch").textContent = p.epoch || 0;
+  $("stLoss").textContent = (p.loss !== undefined && p.loss !== 0) ? p.loss : "-";
+  $("stVal").textContent = (p.val_acc !== undefined && p.val_acc !== null) ? p.val_acc : "-";
+  $("stSps").textContent = p.steps_per_sec || "-";
+  $("stEta").textContent = (p.eta_sec !== null && p.eta_sec !== undefined)
+    ? fmtDur(p.eta_sec) : "-";
+  $("stElapsed").textContent = fmtDur(p.elapsed || 0);
+  $("stFinal").textContent = s.final_acc !== null && s.final_acc !== undefined ? s.final_acc : "-";
+  const prog = s.max_steps ? Math.min(100, (p.step || 0) / s.max_steps * 100) : 0;
+  $("progBar").style.width = prog + "%";
+  drawChart(s.metrics || [], s.val_points || []);
+  if (s.logs && s.logs.length) {
+    const box = $("logBox");
+    box.textContent = s.logs.join("");
+    box.scrollTop = box.scrollHeight;
+  }
+  if (s.last_export) $("exportMsg").textContent = "已导出: " + s.last_export;
+}
+function fmtDur(sec) {
+  sec = Math.round(sec || 0);
+  if (sec < 60) return sec + "s";
+  const m = Math.floor(sec / 60), s = sec % 60;
+  if (m < 60) return m + "m" + s + "s";
+  return Math.floor(m / 60) + "h" + (m % 60) + "m";
+}
+
+async function pollStatus() {
+  try {
+    const s = await get("/status");
+    renderStatus(s);
+    if (s.state === "preparing" || s.state === "running") {
+      setTimeout(pollStatus, 1500);
+    } else {
+      if (s.state === "idle" && $("exportMsg").textContent.startsWith("正在"))
+        loadExported($("projSel").value);
+      setTimeout(pollStatus, 4000);
+    }
+  } catch (e) { setTimeout(pollStatus, 4000); }
+}
+
+/* ---------- 操作 ---------- */
+async function prepare() {
+  busy = true; $("btnPrepare").disabled = true;
+  $("dataInfo").textContent = "正在准备数据...";
+  try {
+    const r = await post("/prepare", {
+      project: $("projSel").value, batch: $("batchSel").value,
+      transfer: $("chkTransfer").checked, reset: $("chkReset").checked,
+      hyperparams: readHp(),
+    });
+    if (r.error) { $("dataInfo").textContent = "准备失败: " + r.error; return; }
+    $("dataInfo").textContent = "准备完成，正在生成 cache...";
+    setTimeout(pollStatus, 500);
+  } catch (e) {
+    $("dataInfo").textContent = "准备失败: " + e.message;
+  } finally { busy = false; }
+}
+
+async function startTrain() {
+  const r = await post("/start", {
+    project: $("projSel").value,
+    max_steps: parseInt($("max_steps").value, 10),
+    hyperparams: readHp(),
+  });
+  if (r.error) { alert("开始失败: " + r.error); return; }
+  pollStatus();
+}
+async function stopTrain() {
+  const r = await post("/stop", {});
+  if (r.error) alert("停止失败: " + r.error);
+}
+async function doExport() {
+  $("exportMsg").textContent = "正在导出(含全验证集评估, 需数秒~数十秒)...";
+  const r = await post("/export", { project: $("projSel").value, checkpoint: "" });
+  if (r.error) { $("exportMsg").textContent = "导出失败: " + r.error; return; }
+  $("exportMsg").textContent = `已导出 ${r.basename} (全验证集准确率 ${r.acc.toFixed(4)})`;
+  loadExported($("projSel").value);
+}
+async function doPublish() {
+  const model = $("exportSel").value;
+  if (!model) { $("pubMsg").textContent = "请先在导出列表选择模型"; return; }
+  $("pubMsg").textContent = "正在发布...";
+  const r = await post("/publish", { project: $("projSel").value, model });
+  if (r.error) { $("pubMsg").textContent = "发布失败: " + r.error; return; }
+  $("pubMsg").className = "ok";
+  $("pubMsg").textContent = `已发布为 ${r.published}` +
+    (r.backup ? `，旧模型备份为 ${r.backup}` : "") +
+    (r.charsets_synced ? "，charsets.json 已同步" : "，警告: 未找到 charsets.json");
+}
+
+/* ---------- 初始化 ---------- */
+async function init() {
+  const [projs, batches] = await Promise.all([get("/projects"), get("/batches")]);
+  const ps = $("projSel"), bs = $("batchSel");
+  (projs.projects || []).forEach(p => { const o = document.createElement("option"); o.value = p; o.textContent = p; ps.appendChild(o); });
+  (batches.batches || []).forEach(b => { const o = document.createElement("option"); o.value = b; o.textContent = b; bs.appendChild(o); });
+  ps.value = (projs.projects || []).includes("apple_captcha") ? "apple_captcha" : (ps.options[0] || {}).value;
+  bs.value = (batches.batches || []).includes("apple") ? "apple" : (bs.options[0] || {}).value;
+  ps.addEventListener("change", () => { reloadConfig(); loadExported(); });
+  await reloadConfig();
+  $("btnPrepare").addEventListener("click", prepare);
+  $("btnStart").addEventListener("click", startTrain);
+  $("btnStop").addEventListener("click", stopTrain);
+  $("btnExport").addEventListener("click", doExport);
+  $("btnPublish").addEventListener("click", doPublish);
+  pollStatus();
+}
+init();
+</script>
+</body>
+</html>

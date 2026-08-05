@@ -1,6 +1,6 @@
 Model:
-    CharSet: [' ', I, U, '7', '4', M, C, '3', '5', T, '9', F, Y, A, '1', S, W, E,
-        G, Z, N, O, J, V, X, P, L, K, H, '2', B, R, D, Q]
+    CharSet: [' ', U, '7', '4', M, C, '3', T, '9', F, Y, A, S, W, E, G, Z, N, O, J,
+        V, X, P, L, K, H, B, R, D, Q]
     ImageChannel: 1
     ImageHeight: 64
     ImageWidth: -1
@@ -20,6 +20,6 @@ Train:
     NUM_WORKERS: 0
     OPTIMIZER: SGD
     SAVE_CHECKPOINTS_STEP: 200
-    TARGET: {Accuracy: 0.98, Cost: 0.05, Epoch: 20}
+    TARGET: {Accuracy: 0.99, Cost: 0.05, Epoch: 3}
     TEST_BATCH_SIZE: 32
     TEST_STEP: 50

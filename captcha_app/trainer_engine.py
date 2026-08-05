@@ -105,11 +105,13 @@ class TrainerEngine:
 
             if reset:
                 self._move_checkpoints_backup()
-            if transfer:
-                self._transfer_init(conf)
-            # cache 最后跑: 需要 Val 已在 config, 且会重写 CharSet/Path
+            # cache 先跑: 会按标记数据统计重写 CharSet(数据驱动), 迁移初始化必须在其后
+            # 用新字符集构建 fc, 否则生成的 checkpoint 输出维度与训练时的 Net 不匹配.
             cacher = cache_data.CacheData(self.project)
             cacher.cache(data_path)
+            if transfer:
+                conf = Config(self.project).load_config()
+                self._transfer_init(conf)
             logger.info(f"数据准备完成: {data_path}")
             self.state = "idle"
             self.reason = ""

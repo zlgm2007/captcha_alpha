@@ -126,8 +126,9 @@ class RecognizerAPI:
             raise ValueError(f"批次 {batch} 没有可识别的图片")
         model = body.get("model", "")
         model_path = rec._resolve_model(model)
+        no_fallback = bool(body.get("no_fallback"))
         # 防重复: 同一批次+模型已有运行中任务, 复用其 job_id
-        exist = rec._active_running_job(batch, model)
+        exist = rec._active_running_job(batch, model, no_fallback)
         if exist:
             return {"ok": True, "job_id": exist["id"], "total": exist["total"],
                     "reused": True}, None
@@ -136,6 +137,7 @@ class RecognizerAPI:
             "batch": batch,
             "model": model,
             "model_path": model_path,
+            "no_fallback": no_fallback,
             "items": [(fn, rec._label_from_name(fn)) for fn in images],
             "total": len(images),
             "processed": 0,

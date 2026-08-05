@@ -190,7 +190,8 @@ class CaptchaRecognizer:
     def recognize(self, image: ImageInput, length: Optional[int] = None,
                   binary: bool = False, gamma: float = 1.3,
                   no_upscale: bool = False,
-                  save_preprocessed: Optional[str] = None) -> CaptchaResult:
+                  save_preprocessed: Optional[str] = None,
+                  no_fallback: bool = False) -> CaptchaResult:
         """识别单张验证码图片.
 
         Args:
@@ -200,6 +201,8 @@ class CaptchaRecognizer:
             gamma:            gamma 校正系数, 0 关闭
             no_upscale:       不放大图片
             save_preprocessed: 预处理图保存路径, 为 None 不落盘
+            no_fallback:      选模型时即使置信门槛未过(模型不确定)也直接用模型自身结果,
+                              不回退内置 ddddocr 投票(用于检验模型本身能力)
 
         Returns:
             CaptchaResult:    识别结果
@@ -336,10 +339,14 @@ class CaptchaRecognizer:
         # ddddocr 多变体投票(实测 val 19/20 vs 内置近 0), 故自定义结果作为首选;
         # 但需 CUSTOM_GAP_MIN 置信门槛把关: 低 gap 说明本模型对该图不确定/图不属于
         # 其训练类别, 不强用专用结果, 退回内置投票, 避免覆盖原本正确的结果.
+        # no_fallback=True 时跳过该门槛(检验模型自身能力, 结果可低置信).
         custom = (custom_text if (custom_text
                   and re.fullmatch(r"[A-Za-z0-9]{2,}", custom_text)) else None)
-        use_custom = (bool(custom) and custom_gap is not None
-                      and custom_gap >= CUSTOM_GAP_MIN)
+        if no_fallback and self.model_path:
+            use_custom = bool(custom)
+        else:
+            use_custom = (bool(custom) and custom_gap is not None
+                          and custom_gap >= CUSTOM_GAP_MIN)
         if use_custom:
             best = custom
         else:

@@ -11,6 +11,8 @@
   (带 gap_min>=0.08 置信门槛: 非本模型类别图自动退回内置投票).
 - 批量测试: 选模型(默认不选) + captcha_data/labeled 下的某个批次目录, 后台逐张
   识别, 表格对比 标记值 vs 模型识别值(✓一致 / ✗不一致), 支持进度查询与缩略图.
+  可选「不回退ddddocr」: 选了模型时即使模型不确定也直接用模型自身结果,
+  不回退内置投票, 用于检验模型本身能力(批跑对比 纯模型 vs 端到端).
 
 用法: python server.py [--port 8772]
 浏览器打开 http://127.0.0.1:8772 即可使用.
@@ -141,10 +143,14 @@ def _batch_history():
         return list(reversed(_load_history()))
 
 
-def _recognize(blob, model_path=""):
-    """调用识别管线并返回 CaptchaResult. 串行锁保护."""
+def _recognize(blob, model_path="", no_fallback=False):
+    """调用识别管线并返回 CaptchaResult. 串行锁保护.
+
+    no_fallback=True 时(选了模型)即使模型不确定也直接用模型自身结果,
+    不回退内置 ddddocr 投票, 用于批跑检验模型本身能力.
+    """
     with _RECOGNIZE_LOCK:
-        return _get_recognizer(model_path).recognize(blob)
+        return _get_recognizer(model_path).recognize(blob, no_fallback=no_fallback)
 
 
 def _list_models():
@@ -206,7 +212,8 @@ def _run_batch(job):
             path = os.path.join(_LABELED_DIR, job["batch"], fn)
             with open(path, "rb") as f:
                 blob = f.read()
-            result = _recognize(blob, job["model_path"])
+            result = _recognize(blob, job["model_path"],
+                                job.get("no_fallback", False))
             pred, conf = result.text, result.confidence
         except Exception as e:
             pred, conf = "", 0.0
@@ -225,12 +232,13 @@ def _run_batch(job):
     _record_history(job)
 
 
-def _active_running_job(batch, model):
-    """防重复: 返回同批次+模型的运行中任务, 无则 None."""
+def _active_running_job(batch, model, no_fallback=False):
+    """防重复: 返回同批次+模型+回退设置的运行中任务, 无则 None."""
     with _JOBS_LOCK:
         for j in _JOBS.values():
             if (j["status"] == "running" and j["batch"] == batch
-                    and j["model"] == model):
+                    and j["model"] == model
+                    and bool(j.get("no_fallback", False)) == bool(no_fallback)):
                 return j
     return None
 
@@ -387,8 +395,9 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError(f"批次 {batch} 没有可识别的图片")
         model = body.get("model", "")
         model_path = _resolve_model(model)
-        # 防重复: 同一批次+模型已有运行中任务, 复用其 job_id, 不另起线程
-        exist = _active_running_job(batch, model)
+        no_fallback = bool(body.get("no_fallback"))
+        # 防重复: 同一批次+模型+回退设置已有运行中任务, 复用其 job_id, 不另起线程
+        exist = _active_running_job(batch, model, no_fallback)
         if exist:
             self._send_json({"ok": True, "job_id": exist["id"],
                              "total": exist["total"], "reused": True})
@@ -398,6 +407,7 @@ class Handler(BaseHTTPRequestHandler):
             "batch": batch,
             "model": model,
             "model_path": model_path,
+            "no_fallback": no_fallback,
             "items": [(fn, _label_from_name(fn)) for fn in images],
             "total": len(images),
             "processed": 0,

@@ -95,6 +95,10 @@
   .stat.bad { color: #cf222e; }
   .filter { display: none; margin-top: 10px; font-size: 13px; color: #57606a; }
   .filter input { margin-right: 6px; }
+  .batch-opt { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 13px; color: #57606a; cursor: pointer; }
+  .batch-opt input { margin: 0; }
+  .batch-opt small { color: #8b949e; }
+  .batch-opt.disabled { opacity: .5; pointer-events: none; }
   .active-jobs {
     display: none; margin-top: 16px; padding: 14px; border: 1px solid #d0d7de;
     border-radius: 8px; background: #fcfcfd;
@@ -223,6 +227,12 @@
     <label for="batchSel">数据批次（<code>captcha_data/labeled/</code> 下的目录）</label>
     <select id="batchSel"><option value="">— 加载中 —</option></select>
   </div>
+  <label class="batch-opt" id="noFallbackWrap"
+         title="选中后即使用模型自身结果：即使置信门槛未过（模型不确定）也不回退内置 ddddocr 投票，用于检验模型本身能力">
+    <input type="checkbox" id="noFallback">
+    <span>不回退ddddocr</span>
+    <small>模型不确定时也用模型自身结果（不回落内置投票）</small>
+  </label>
   <div class="btn-row">
     <button class="btn" id="batchBtn">开始批量测试</button>
     <button class="btn secondary" id="batchStop" disabled>停止</button>
@@ -303,6 +313,16 @@ async function loadMeta() {
 loadMeta();
 loadJobs();
 renderHistory();
+
+// 「不回退ddddocr」仅在选了模型时有意义: 未选模型时禁用该选项
+function syncNoFallback() {
+  const on = !!$("#modelSel").value;
+  $("#noFallback").disabled = !on;
+  $("#noFallbackWrap").classList.toggle("disabled", !on);
+  if (!on) $("#noFallback").checked = false;
+}
+$("#modelSel").addEventListener("change", syncNoFallback);
+syncNoFallback();
 
 // ---- 单图识别 ----
 $("#drop").addEventListener("click", () => $("#file").click());
@@ -408,7 +428,7 @@ async function startBatch() {
     const r = await fetch("/rec/api/batch/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model, batch }),
+      body: JSON.stringify({ model, batch, no_fallback: $("#noFallback").checked }),
     });
     const d = await r.json();
     if (!r.ok) { showError(d.error || "启动失败"); resetBatchUI(); return; }

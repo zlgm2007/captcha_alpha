@@ -87,15 +87,28 @@ class CacheData:
             else:
                 logger.warning("\nFile({}) has a suffix that is not allowed! We will remove it!".format(file))
         labels = set(labels)
-        # 保持已有 charset 顺序稳定(续训时 fc 输出索引按 charset 顺序对应, 重排会错乱):
-        # 已有字符保留原顺序, 新字符按字母序追加. 非 Word 模式首位空格(CTC blank)保留.
+        # 字符集由标记数据统计驱动: 只保留数据中真实出现的字符, 自动丢弃配置里从未
+        # 出现过的"死字符"(如 apple 数据里没有的 0/1/2/5/6/8/I), 使 fc 输出维度收敛
+        # 到真实字符数, 避免 CTC softmax 为不存在的字符浪费类别/产生幽灵混淆.
+        # 已存在字符保持原顺序(续训时 fc 索引按 charset 顺序对应, 重排会错乱),
+        # 新出现的字符按字母序追加; 非 Word 模式首位空格(CTC blank)保留.
+        word = bool(self.conf['Model']['Word'])
         old_charset = list(self.conf['Model'].get('CharSet') or [])
         if old_charset:
-            labels = old_charset + sorted(labels - set(old_charset))
+            keep = [c for c in old_charset if c in labels or (c == " " and not word)]
+            labels = keep + sorted(labels - set(old_charset))
+            if not word and " " not in labels:
+                labels.insert(0, " ")
         else:
             labels = list(labels)
-            if not self.conf['Model']['Word']:
+            if not word:
                 labels.insert(0, " ")
+        dropped = [c for c in old_charset if c not in labels and c != " "]
+        if dropped:
+            logger.warning(
+                "字符集由标记数据统计: 丢弃从未出现的字符 {} (fc 输出维度变化, 旧 checkpoint 不兼容, "
+                "需勾选迁移学习初始化/清空旧 checkpoint 后重新训练)".format(
+                    json.dumps(dropped, ensure_ascii=False)))
         logger.info("\nCoolect labels is {}".format(json.dumps(labels, ensure_ascii=False)))
         self.conf['System']['Path'] = base_path
         self.conf['Model']['CharSet'] = labels

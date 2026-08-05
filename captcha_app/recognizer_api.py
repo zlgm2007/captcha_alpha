@@ -68,6 +68,9 @@ class RecognizerAPI:
     def _get_batch_jobs(self, q):
         return {"jobs": rec._batch_jobs()}, None
 
+    def _get_batch_history(self, q):
+        return {"history": rec._batch_history()}, None
+
     def _get_image(self, q):
         batch = self._q(q, "batch")
         filename = self._q(q, "file")
@@ -169,6 +172,7 @@ class RecognizerAPI:
         "batch/status": _get_batch_status,
         "batch/result": _get_batch_result,
         "batch/jobs": _get_batch_jobs,
+        "batch/history": _get_batch_history,
         "image": _get_image,
     }
 

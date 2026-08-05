@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>验证码工作台</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font: 14px/1.5 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f0f2f5; color: #1f2328; display: flex; flex-direction: column;
+  }
+  header {
+    background: #24292f; color: #fff; display: flex; align-items: flex-end;
+    padding: 0 16px; height: 52px; flex: none; gap: 8px;
+  }
+  header .brand { font-size: 15px; font-weight: 700; letter-spacing: 1px; margin: 0 16px 15px 0; }
+  header .menu { display: flex; gap: 4px; align-self: flex-end; }
+  header .menu button {
+    border: none; background: transparent; color: #c9d1d9; font-size: 14px;
+    padding: 10px 20px; border-radius: 8px 8px 0 0; cursor: pointer; font-weight: 600;
+  }
+  header .menu button:hover { color: #fff; background: rgba(255,255,255,.08); }
+  header .menu button.active { color: #24292f; background: #f0f2f5; }
+  main { flex: 1; min-height: 0; position: relative; }
+  main iframe {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    border: none; background: #f0f2f5;
+  }
+  main iframe.hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">验证码工作台</div>
+  <nav class="menu" id="menu">
+    <button data-tab="labeler" class="active">数据标注</button>
+    <button data-tab="recognizer">模型检验&amp;批跑</button>
+    <button data-tab="trainer">模型训练</button>
+  </nav>
+</header>
+<main>
+  <iframe id="f-labeler" src="/static/labeler.html"></iframe>
+  <iframe id="f-recognizer" src="/static/recognizer.html" class="hidden"></iframe>
+  <iframe id="f-trainer" src="/static/trainer.html" class="hidden"></iframe>
+</main>
+<script>
+const menu = document.getElementById("menu");
+menu.addEventListener("click", (e) => {
+  const btn = e.target.closest("button");
+  if (!btn) return;
+  const tab = btn.dataset.tab;
+  document.querySelectorAll("header .menu button").forEach(b =>
+    b.classList.toggle("active", b === btn));
+  ["labeler", "recognizer", "trainer"].forEach(t => {
+    document.getElementById("f-" + t).classList.toggle("hidden", t !== tab);
+  });
+});
+</script>
+</body>
+</html>

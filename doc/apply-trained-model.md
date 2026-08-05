@@ -121,7 +121,7 @@ python src/main.py captcha_data/raw/apple/2026-07-31-16-31-00.png \
 
 | 现象 | 排查 |
 | --- | --- |
-| 输出乱码 / 全是同一字符 | `charsets.json` 与 onnx 不配套，或字符集没找到（确认路径）；或导出的 onnx 是 argmax 索引而非 logits（新版 ddddocr 会二次 argmax，需用 `utils/train.py` 的 logits 导出重新导出） |
+| 输出乱码 / 全是同一字符 | `charsets.json` 与 onnx 不配套，或字符集没找到（确认路径）；或导出的 onnx 是 argmax 索引而非 logits（新版 ddddocr 会二次 argmax，需用 `captcha_app/trainer_export.py` 的 logits 导出重新导出） |
 | 结果不在字符集内 | 训练时标注含字符集外字符，重新 cache 生成字符集 |
 | 模型对新图全错 | 样本太少过拟合，需采集 ≥300 张重训；难样本优先迁移学习（见训练优化文档） |
 | 加了 `--model` 却没看到 `(自定义)` 候选 | 确认 onnx/charsets 路径存在、可读 |

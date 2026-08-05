@@ -22,6 +22,7 @@ import json
 import os
 import sys
 import threading
+import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -144,6 +145,29 @@ def _run_batch(job):
     job["status"] = "done"
 
 
+def _active_running_job(batch, model):
+    """防重复: 返回同批次+模型的运行中任务, 无则 None."""
+    with _JOBS_LOCK:
+        for j in _JOBS.values():
+            if (j["status"] == "running" and j["batch"] == batch
+                    and j["model"] == model):
+                return j
+    return None
+
+
+def _batch_jobs():
+    """所有批跑任务快照(新→旧), 供前端展示进行中/最近完成."""
+    with _JOBS_LOCK:
+        jobs = [{
+            "job_id": j["id"], "batch": j["batch"], "model": j["model"],
+            "status": j["status"], "total": j["total"], "processed": j["processed"],
+            "started_at": j.get("started_at", ""),
+            "start_ts": j.get("start_ts", 0),
+        } for j in _JOBS.values()]
+    jobs.sort(key=lambda x: x["start_ts"], reverse=True)
+    return jobs[:20]
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -191,6 +215,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_batch_status(query)
             elif path == "/api/batch/result":
                 self._api_batch_result(query)
+            elif path == "/api/batch/jobs":
+                self._api_batch_jobs(query)
             elif path == "/api/image":
                 self._api_image(query)
             else:
@@ -277,11 +303,18 @@ class Handler(BaseHTTPRequestHandler):
         images = _batch_images(batch)
         if not images:
             raise ValueError(f"批次 {batch} 没有可识别的图片")
-        model_path = _resolve_model(body.get("model", ""))
+        model = body.get("model", "")
+        model_path = _resolve_model(model)
+        # 防重复: 同一批次+模型已有运行中任务, 复用其 job_id, 不另起线程
+        exist = _active_running_job(batch, model)
+        if exist:
+            self._send_json({"ok": True, "job_id": exist["id"],
+                             "total": exist["total"], "reused": True})
+            return
         job = {
             "id": uuid.uuid4().hex,
             "batch": batch,
-            "model": body.get("model", ""),
+            "model": model,
             "model_path": model_path,
             "items": [(fn, _label_from_name(fn)) for fn in images],
             "total": len(images),
@@ -289,11 +322,16 @@ class Handler(BaseHTTPRequestHandler):
             "results": [],
             "status": "running",
             "cancel": False,
+            "start_ts": time.time(),
+            "started_at": time.strftime("%m-%d %H:%M:%S"),
         }
         with _JOBS_LOCK:
             _JOBS[job["id"]] = job
         threading.Thread(target=_run_batch, args=(job,), daemon=True).start()
         self._send_json({"ok": True, "job_id": job["id"], "total": job["total"]})
+
+    def _api_batch_jobs(self, query):
+        self._send_json({"jobs": _batch_jobs()})
 
     def _api_batch_status(self, query):
         job_id = (query.get("job_id") or [""])[0]

@@ -143,7 +143,7 @@ recognize_captcha_batch(image_paths, length=0)
 
 ## 四、WorkBuddy 技能包
 
-项目已打包技能包（仓库内位于 `mcp/captcha-recognition/`，分发产物为 `captcha-recognition.zip`），包含：
+项目已打包技能包（仓库内位于 `mcp/captcha-recognition/`），包含：
 
 - `SKILL.md`：使用说明（触发场景、工具调用方式）
 - `references/api_reference.md`：MCP Server API 参考

@@ -6,7 +6,7 @@
 权重映射已对 onnxruntime 验证: 骨干 maxdiff~5e-6, LSTM maxdiff~3e-6.
 
 用法: cd captcha_trainer && python transfer_pretrained.py --project_name apple_captcha
-产物: projects/<project>/checkpoints/checkpoint_<project>_0_0.tar (train.py 续训入口)
+产物: projects/<project>/checkpoints/checkpoint_<project>_0_0.tar (captcha_app 训练引擎续训入口)
 """
 import os
 import sys

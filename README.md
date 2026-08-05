@@ -48,9 +48,9 @@ captcha_alpha/                            # 验证码识别与训练工具（仓
 ├── captcha_data/
 │   ├── raw/                            # 待标注图片目录
 │   └── labeled/                        # 标注输出目录（label_hash.png）
-├── captcha_data_labeler/               # 独立标注工具（Web + stdlib 零依赖，server.py + static/）
+├── captcha_data_labeler/               # 标注库（server.py 供 captcha_app 复用，非独立服务）
+├── captcha_app/                        # 集成工作台（标注/检验批跑/训练 三合一，单端口）
 ├── captcha_trainer/                    # dddd_trainer 训练框架（已适配 Python 3.12 + 新版 torch）
-│   ├── app.py                          # 训练 CLI（create / cache / train）
 │   ├── configs/                        # 全局配置基类
 │   ├── nets/backbone/                  # 可选骨干网络（ddddocr / efficientnet / mobilenet）
 │   ├── utils/                          # 缓存 / 加载 / 训练工具
@@ -313,16 +313,20 @@ python src/label_tool.py --raw captcha_data/raw --labeled captcha_data/labeled -
 
 ### 3. 训练
 
+**推荐方式：集成工作台**（训练 + 标注 + 检验在一个页面）：
+
 ```bash
-cd captcha_trainer
-python app.py cache douyin_captcha ../captcha_data/labeled   # 生成缓存+字符集
-python app.py train douyin_captcha                            # 训练（MPS 自动启用）
+python captcha_app/server.py --port 8800   # 打开 http://127.0.0.1:8800
 ```
 
-- `cache` 自动从所有标注收集字符集（索引 0 为 CTC blank）并切 3% 做验证集
-- `train` 训练至 `Accuracy ≥ 0.97` 后自动导出 `projects/douyin_captcha/models/*.onnx` + `charsets.json`
-- checkpoint 每 2000 step 保存，中断后重跑 `train` 会自动续训
-- **MPS（Apple Silicon GPU）自动加速**：`GPU: false` 且 MPS 可用时自动走 MPS，无需改配置。实测 M4 Pro 上约 **0.48s/步**（2000 步约 18 分钟），比单线程 CPU 快约 27 倍（`utils/train.py` 启动日志会打印 `USE MPS`）
+进入「模型训练」页：选项目/批次 → 准备数据（自动生成缓存 + 字符集）→ 开始训练。支持超参调参、
+指标曲线、ETA 预估、优雅停止；命中目标准确率自动导出 onnx + charsets.json（时间戳命名），可一键
+发布到主项目 `models/` 替换 `apple_captcha.onnx`。
+
+> 训练引擎底层仍是 dddd_trainer 的 `configs / nets / utils`（位于 `captcha_trainer/`），仅入口改为
+> 工作台页面。`cache` 自动从标注收集字符集（索引 0 为 CTC blank）并切 `Val` 比例做验证集。
+> **MPS（Apple Silicon GPU）自动加速**：`GPU: false` 且 MPS 可用时自动走 MPS，无需改配置。
+> 实测 M4 Pro 上约 **0.48s/步**，比单线程 CPU 快约 27 倍。
 
 > 已配置好的 `projects/douyin_captcha/config.yaml`：`GPU: false`、灰度图（`ImageChannel: 1`）、高度 64（`ImageHeight: 64`，16 的倍数）、宽度自适应（`ImageWidth: -1`）、CRNN（`Word: false`）、backbone 用 `ddddocr`。
 >
@@ -401,7 +405,7 @@ pytest tests/ -v -k "KnownDifficult"
 - **识别结果多了 `?` 或非字母数字**：通常是预处理/分割不理想，用 `--length` 指定长度、或加 `--binary` 重试。
 - **逐字符模式结果差**：逐字符是兜底策略，依赖字符间空隙；粘连严重的图优先用整图 + gamma。
 - **训练后模型还是不准**：多为标注数据问题——确保标注正确、覆盖足够字符、样本量 ≥ 300。
-- **想训练新一类验证码**：新建项目即可，`python app.py create <项目名>` 后按上面配置改 `config.yaml`。
+- **想训练新一类验证码**：工作台训练页「准备数据」会自动创建项目，选对应数据批次即可，无需手动建目录。
 
 ---
 

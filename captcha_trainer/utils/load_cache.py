@@ -56,7 +56,17 @@ class LoadCache(Dataset):
         logger.info("\nReading Cache File... ----> {}".format(self.cache_path))
 
         with open(self.cache_path, 'r', encoding='utf-8') as f:
-            self.caches = f.readlines()
+            lines = f.readlines()
+        # 过滤 cache 中引用已不存在图片的条目(标记数据被增删后 cache 过期),
+        # 避免每 epoch 反复报缺失错误 + 无效样本空占 batch 位.
+        valid = [ln for ln in lines if os.path.isfile(
+            os.path.join(self.path, ln.split("\t")[0]))]
+        if len(valid) != len(lines):
+            logger.warning(
+                "Cache {} 过滤 {} 条引用不存在图片的条目(剩余 {})".format(
+                    os.path.basename(self.cache_path),
+                    len(lines) - len(valid), len(valid)))
+        self.caches = valid
         self.caches_num = len(self.caches)
         logger.info("\nRead Cache File End! Caches Num is {}.".format(self.caches_num))
 

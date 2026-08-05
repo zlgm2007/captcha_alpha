@@ -88,8 +88,8 @@ def recognize_captcha(image_path: str, length: int = 0) -> str:
 def recognize_apple_captcha(image_path: str, length: int = 0) -> str:
     """识别苹果来源验证码图片, 返回识别结果 JSON (自动加载苹果专用迁移模型).
 
-    苹果专用模型针对该类验证码训练, 识别效果优于通用模型; 对非苹果图
-    (模型置信低)会自动退回通用内置识别.
+    默认只用苹果专用模型自身结果, 不回退内置 ddddocr; 针对该类验证码训练,
+    识别效果优于通用模型. 注意: 对非苹果图模型也会给出自身猜测(可能不正确).
 
     Args:
         image_path: 图片文件绝对路径

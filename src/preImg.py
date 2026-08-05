@@ -168,17 +168,21 @@ def detect_noise_blocks(gray, min_run=7, min_w=8, max_w=45, min_h=2, max_h=20,
     return out
 
 
-def repair_noise_blocks(src, recognize_fn=None):
+def repair_noise_blocks(src, recognize_fn=None, blocks=None):
     """抹白盖在字符上的噪点块, 返回修复后的灰度图.
 
     src 可为路径/bytes/ndarray(经 read_image 读取).
+    blocks 可选: 已检测出的噪点块列表 [(x, y, w, h), ...]; 提供时跳过内部
+    再次 detect_noise_blocks(该检测较慢, 调用方已算过时传入避免重复计算).
     recognize_fn 可选: 提供时(gray)->str, 仅当修复后整图仍能识别为有效
     字母数字串才应用修复, 否则退回原图 —— 防止把字符自身粗笔画误抹.
     """
     img = read_image(src)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
     repaired = gray.copy()
-    for x, y, bw, bh in detect_noise_blocks(gray):
+    if blocks is None:
+        blocks = detect_noise_blocks(gray)
+    for x, y, bw, bh in blocks:
         repaired[y:y + bh, x:x + bw] = 255
     if recognize_fn is not None:
         after = recognize_fn(repaired) or ""

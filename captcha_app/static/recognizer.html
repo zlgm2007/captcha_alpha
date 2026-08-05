@@ -168,6 +168,7 @@
   .h-nums { width: 150px; flex: none; text-align: right; font-variant-numeric: tabular-nums; }
   .h-nums .acc { color: #1a7f37; font-weight: 600; }
   .h-nums .mis { color: #cf222e; font-weight: 600; }
+  .h-time { display: block; font-size: 12px; color: #8b949e; font-variant-numeric: tabular-nums; }
 
 </style>
 </head>
@@ -636,8 +637,10 @@ async function renderHistory() {
     const rows = h.map(x => {
       const pctOk = x.total ? (x.accurate / x.total * 100) : 0;
       const pctBad = x.total ? (x.inaccurate / x.total * 100) : 0;
+      const endTxt = x.end_time ? x.end_time.slice(11) : "—";
+      const durTxt = (x.duration_sec != null) ? `${Math.round(x.duration_sec)}s` : "—";
       return `<div class="h-row">
-        <div class="h-meta"><span class="h-date">${esc(x.date)}</span><span class="h-model" title="${esc(x.model)}">${esc(x.model)}</span></div>
+        <div class="h-meta"><span class="h-date">${esc(x.date)}</span><span class="h-model" title="${esc(x.model)}">${esc(x.model)}</span><span class="h-time">结束 ${esc(endTxt)} · 耗时 ${durTxt}</span></div>
         <div class="h-bar">
           <div class="h-seg ok" style="width:${pctOk}%" title="准确 ${x.accurate}"></div>
           <div class="h-seg bad" style="width:${pctBad}%" title="不准确 ${x.inaccurate}"></div>

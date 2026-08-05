@@ -11,9 +11,11 @@
   - recognize_apple(): 苹果验证码专用识别快捷函数(自动加载 models/apple_captcha.onnx)
 
 两个快捷入口的选用:
-  - recognize(image):     通用验证码, 不传模型, 走内置多策略投票
-  - recognize_apple(image): 苹果来源验证码, 自动加载专用迁移模型; 自定义结果经
-    gap_min>=0.08 置信门槛后优先, 非苹果图(模型不确定)自动退回内置投票
+  - recognize(image):     通用验证码, 不传模型, 走内置多策略投票; 传模型 + no_fallback/
+                          model_only 时不回退(仅在选了模型时生效)
+  - recognize_apple(image): 苹果来源验证码, 自动加载专用迁移模型, 默认只用苹果模型
+                          自身结果(不回退); 传 model_only=False 恢复 gap_min>=0.08
+                          置信门槛 + 非苹果图自动退回内置投票
 
 支持的图片输入类型:
   - str / pathlib.Path:  文件路径
@@ -187,11 +189,48 @@ class CaptchaRecognizer:
                 get_engine(beta=False)
             self._preloaded = True
 
+    def _run_custom_model(self, image_bytes: bytes):
+        """跑一次自定义模型推理(原始字节), 返回 (text, conf, gap_min).
+
+        conf 为逐时间步 top1 概率均值, gap_min 为逐时间步 top1-top2 差距最小值
+        (用于 CUSTOM_GAP_MIN 置信门槛). 无模型时返回 (None, None, None).
+        """
+        if not self.model_path:
+            return None, None, None
+        engine = get_engine(beta=True, import_onnx_path=self.model_path,
+                            charsets_path=self.charsets_path)
+        prob = engine.classification(image_bytes, probability=True)
+        text = (prob or {}).get("text") or ""
+        conf = gap = None
+        probs = (prob or {}).get("probabilities")
+        if probs is not None:
+            p = np.asarray(probs, dtype=np.float32)
+            if p.ndim == 3:
+                p = p[:, 0, :]
+            sp = np.sort(p, axis=-1)
+            gap = float((sp[..., -1] - sp[..., -2]).min())
+            conf = float(p.max(axis=-1).mean())
+        return text, conf, gap
+
+    def _recognize_model_only(self, image_bytes: bytes) -> CaptchaResult:
+        """模型-only 推理: 只跑自定义模型一次(原始字节), 返回模型自身结果.
+
+        不做预处理变体/内置投票/置信门槛/回退, 速度最快; 置信度取逐时间步
+        top1 概率均值. 需要 model_path(专用模型), 无则报错.
+        """
+        if not self.model_path:
+            raise ValueError("model_only 需要选择自定义模型(model_path)")
+        text, conf, _ = self._run_custom_model(image_bytes)
+        candidates = [Candidate(label="自定义", text=text)] if text else []
+        return CaptchaResult(text=text, candidates=candidates,
+                             confidence=round(conf or 0.0, 4), length=len(text))
+
     def recognize(self, image: ImageInput, length: Optional[int] = None,
                   binary: bool = False, gamma: float = 1.3,
                   no_upscale: bool = False,
                   save_preprocessed: Optional[str] = None,
-                  no_fallback: bool = False) -> CaptchaResult:
+                  no_fallback: bool = False,
+                  model_only: bool = False) -> CaptchaResult:
         """识别单张验证码图片.
 
         Args:
@@ -203,6 +242,8 @@ class CaptchaRecognizer:
             save_preprocessed: 预处理图保存路径, 为 None 不落盘
             no_fallback:      选模型时即使置信门槛未过(模型不确定)也直接用模型自身结果,
                               不回退内置 ddddocr 投票(用于检验模型本身能力)
+            model_only:       只跑自定义模型(需选模型), 跳过内置多变体投票/置信门槛/回退,
+                              最快且结果即模型自身预测(适合专用模型 API 调用)
 
         Returns:
             CaptchaResult:    识别结果
@@ -218,6 +259,42 @@ class CaptchaRecognizer:
             image_bytes = to_bytes(image)
         except Exception as e:
             raise InvalidImageError(f"无法解析图片: {e}") from e
+
+        # 模型-only 快路径: 只跑自定义模型一次推理, 跳过内置多变体/置信门槛/回退.
+        # 适合专用模型(如 apple)做 API, 最快且结果即模型自身预测.
+        if model_only:
+            return self._recognize_model_only(image_bytes)
+
+        # 自定义模型早跑: 选中模型时先跑一次推理. 两种情况直接返回, 跳过内置
+        # 多变体投票(每张图 20+ 次推理, 是最重成本):
+        #   - no_fallback: 结果即模型自身预测(检验模型能力), 与 model_only 同答案
+        #   - gap_min >= CUSTOM_GAP_MIN: 模型确信(本类别图), 该结果即最终答案,
+        #     内置投票只会是同样答案 + 冗余候选
+        # 两者都不满足(模型不确定/非本类别图)时继续走完整管线做回退, 本次推理
+        # 结果在下方复用, 不重复计算.
+        custom_text = custom_conf = custom_gap = None
+        custom = None
+        if self.model_path:
+            try:
+                custom_text, custom_conf, custom_gap = self._run_custom_model(image_bytes)
+            except Exception:
+                pass
+            custom = (custom_text if (custom_text
+                      and re.fullmatch(r"[A-Za-z0-9]{2,}", custom_text)) else None)
+            # save_preprocessed 需要完整管线生成预处理图, 两种快路径均跳过
+            if no_fallback and custom and save_preprocessed is None:
+                return CaptchaResult(
+                    text=custom,
+                    candidates=[Candidate(label="自定义", text=custom)],
+                    confidence=round(custom_conf or 0.0, 4),
+                    length=len(custom))
+            if (custom and save_preprocessed is None and custom_gap is not None
+                    and custom_gap >= CUSTOM_GAP_MIN):
+                return CaptchaResult(
+                    text=custom,
+                    candidates=[Candidate(label="原图(自定义)", text=custom)],
+                    confidence=round(custom_conf or 0.0, 4),
+                    length=len(custom))
 
         upscale = 1 if no_upscale else 2
 
@@ -261,10 +338,12 @@ class CaptchaRecognizer:
             # 原图: 不经任何预处理
             variants.append(("原图", None))
             # 噪点修复: 检测并抹白盖在字符上的实心矩形噪点
+            # detect_noise_blocks 较慢(纯 Python 子矩形搜索), repair 复用检测结果,
+            # 避免重复计算.
             try:
                 gray = to_gray(image)
                 noise_blocks = detect_noise_blocks(gray)
-                repaired = repair_noise_blocks(gray)
+                repaired = repair_noise_blocks(gray, blocks=noise_blocks)
                 variants.append(("噪点修复", _binarize(repaired, gamma=gamma)))
             except Exception:
                 noise_blocks = []
@@ -284,29 +363,9 @@ class CaptchaRecognizer:
         # 专用模型按训练数据格式训练(原始灰度、等比缩放至高64、/255), 只吃原图.
         # 增强/提白/放大/自适应阈值等变体是给内置 ddddocr 调的, 喂给专用模型会
         # 严重拉低识别率(实测 0/12 -> 仅原图 19/20), 故只对原始字节跑一次.
-        # 用 probability 模式一次推理同时拿文本与逐时间步概率. 自定义结果不入内置
-        # 投票池: 若混入, 其长度会污染内置长度推断、其文本会干扰内置 pick_best
-        # (实测 gated 时 test2 被自定义 KTDEQL 带偏). 仅通过置信门槛时作最终答案,
-        # 并最后拼进候选列表用于展示.
-        custom_text = None
-        custom_conf = None
-        custom_gap = None
-        if self.model_path:
-            try:
-                engine = get_engine(beta=True, import_onnx_path=self.model_path,
-                                    charsets_path=self.charsets_path)
-                prob = engine.classification(image_bytes, probability=True)
-                custom_text = (prob or {}).get("text") or ""
-                probs = (prob or {}).get("probabilities")
-                if probs is not None:
-                    p = np.asarray(probs, dtype=np.float32)
-                    if p.ndim == 3:
-                        p = p[:, 0, :]
-                    sp = np.sort(p, axis=-1)
-                    custom_gap = float((sp[..., -1] - sp[..., -2]).min())
-                    custom_conf = float(p.max(axis=-1).mean())
-            except Exception:
-                pass
+        # 该推理已在上方提前执行(custom_text/gap/conf), 若未命中快路径(模型不确定),
+        # 走到这里做内置投票回退; 自定义结果不入内置投票池(防长度污染/文本带偏),
+        # 仅通过置信门槛时作最终答案, 并最后拼进候选列表用于展示.
 
         # ---- 4. 自动推断长度 ----
         hint = length
@@ -335,27 +394,14 @@ class CaptchaRecognizer:
             return CaptchaResult(text="", candidates=[], confidence=0.0, length=0)
 
         # ---- 5. 择优 ----
-        # 专用模型按训练集格式训练(原始灰度等比缩放), 在 hard case 上远强于内置
-        # ddddocr 多变体投票(实测 val 19/20 vs 内置近 0), 故自定义结果作为首选;
-        # 但需 CUSTOM_GAP_MIN 置信门槛把关: 低 gap 说明本模型对该图不确定/图不属于
-        # 其训练类别, 不强用专用结果, 退回内置投票, 避免覆盖原本正确的结果.
-        # no_fallback=True 时跳过该门槛(检验模型自身能力, 结果可低置信).
-        custom = (custom_text if (custom_text
-                  and re.fullmatch(r"[A-Za-z0-9]{2,}", custom_text)) else None)
-        if no_fallback and self.model_path:
-            use_custom = bool(custom)
-        else:
-            use_custom = (bool(custom) and custom_gap is not None
-                          and custom_gap >= CUSTOM_GAP_MIN)
-        if use_custom:
-            best = custom
-        else:
-            expect_len = length if length is not None else hint
-            best = pick_best(candidates, expect_len=expect_len)
+        # 走到这里时自定义模型要么没输出有效文本、要么 gap_min < CUSTOM_GAP_MIN
+        # (模型不确定/非本类别图), 快路径已在上方返回, 故此处恒为内置投票兜底.
+        # 用"自定义结果经置信门槛作最终答案"的场景全部由上方快路径覆盖.
+        expect_len = length if length is not None else hint
+        best = pick_best(candidates, expect_len=expect_len)
 
-        # 噪点修复优先逻辑: 仅对内置模型投票结果生效; 专用模型结果入选时不覆盖
-        # (专用模型吃原图, 实测噪声块不影响其识别)
-        if noise_blocks and not use_custom:
+        # 噪点修复优先逻辑: 仅对内置投票结果生效(此路径恒无自定义结果入选)
+        if noise_blocks:
             repair_result = next(
                 (t for label, t in candidates
                  if "噪点修复" in label and re.fullmatch(r"[A-Za-z0-9]{2,}", t)),
@@ -364,24 +410,20 @@ class CaptchaRecognizer:
                 best = repair_result
 
         # ---- 6. 置信度 ----
-        if use_custom and custom_conf is not None:
-            # 专用模型入选: 用模型逐时间步 top1 概率均值
-            confidence = custom_conf
+        # 自定义结果入选时(置信门槛通过/不回退)已在上方快路径返回, 此处为内置择优.
+        valid_texts = [t for _, t in candidates
+                       if re.fullmatch(r"[A-Za-z0-9]+", t)]
+        if valid_texts:
+            vote_counts = Counter(valid_texts)
+            # 归一化到 0~1
+            confidence = vote_counts.get(best, 0) / len(valid_texts)
+            # 考虑子序列支持带来的额外置信度提升
+            # 如果有多个候选与 best 一致(直接匹配), 置信度更高
+            exact_matches = sum(1 for t in valid_texts if t == best)
+            if exact_matches >= 2:
+                confidence = min(1.0, confidence + 0.1 * (exact_matches - 1))
         else:
-            # 内置择优: 最终结果在有效候选中的得票占比
-            valid_texts = [t for _, t in candidates
-                           if re.fullmatch(r"[A-Za-z0-9]+", t)]
-            if valid_texts:
-                vote_counts = Counter(valid_texts)
-                # 归一化到 0~1
-                confidence = vote_counts.get(best, 0) / len(valid_texts)
-                # 考虑子序列支持带来的额外置信度提升
-                # 如果有多个候选与 best 一致(直接匹配), 置信度更高
-                exact_matches = sum(1 for t in valid_texts if t == best)
-                if exact_matches >= 2:
-                    confidence = min(1.0, confidence + 0.1 * (exact_matches - 1))
-            else:
-                confidence = 0.0
+            confidence = 0.0
 
         # 自定义结果仅用于展示(不入投票池), 拼到候选列表末尾
         final_candidates = list(candidates)
@@ -461,18 +503,21 @@ def recognize(image: ImageInput, length: Optional[int] = None,
 
 def recognize_apple(image: ImageInput, length: Optional[int] = None,
                     model_path: str = APPLE_MODEL_PATH, charsets_path: str = "",
-                    **kwargs) -> CaptchaResult:
+                    model_only: bool = True, **kwargs) -> CaptchaResult:
     """苹果验证码专用识别快捷函数 (自动加载 models/apple_captcha.onnx).
 
-    自定义模型结果经 gap_min>=0.08 置信门槛后优先(详见 CUSTOM_GAP_MIN); 对非苹果图
-    (模型不确定、gap 低)自动退回内置 ddddocr 多策略投票, 避免专用模型把垃圾结果
-    强加给无关图. 首次调用时创建苹果专用识别器并缓存, 后续复用.
+    默认 model_only=True: 只跑苹果专用模型自身结果, 不回退内置 ddddocr 投票
+    (结果即模型预测, 对非苹果图也会给出模型自己的猜测, 不保证正确).
+    传 model_only=False 恢复旧行为: 自定义结果经 gap_min>=0.08 置信门槛后优先,
+    对非苹果图(模型不确定、gap 低)自动退回内置 ddddocr 多策略投票.
+    首次调用时创建苹果专用识别器并缓存, 后续复用.
 
     Args:
             image:      图片输入 (路径 / bytes / ndarray)
             length:     期望验证码长度
             model_path: 专用模型 onnx 路径 (默认 models/apple_captcha.onnx)
             charsets_path: 模型字符集 json (默认取模型同目录 charsets.json)
+            model_only: 默认 True=只用苹果模型(不回退); False=走置信门槛+回退
             **kwargs:   传递给 CaptchaRecognizer.recognize() 的参数
 
     Returns:
@@ -482,4 +527,5 @@ def recognize_apple(image: ImageInput, length: Optional[int] = None,
     if _apple_recognizer is None or model_path != _apple_recognizer.model_path:
         _apple_recognizer = CaptchaRecognizer(model_path=model_path,
                                               charsets_path=charsets_path)
-    return _apple_recognizer.recognize(image, length=length, **kwargs)
+    return _apple_recognizer.recognize(image, length=length,
+                                       model_only=model_only, **kwargs)

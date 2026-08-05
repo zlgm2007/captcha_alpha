@@ -119,15 +119,19 @@ def _save_history(entry):
 
 
 def _record_history(job):
-    """批跑完成时写入一条历史记录(日期/模型/总量/准确数/不准确数)."""
+    """批跑完成时写入一条历史记录(起止时间/耗时/模型/总量/准确数/不准确数)."""
     try:
         results = job.get("results") or []
         total = len(results)
         matched = sum(1 for r in results if r["match"])
         if total == 0:
             return
+        start_ts = job.get("start_ts") or time.time()
+        end_ts = job.get("end_ts") or time.time()
         _save_history({
-            "date": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "date": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start_ts)),
+            "end_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(end_ts)),
+            "duration_sec": round(max(0, end_ts - start_ts), 1),
             "model": job.get("model") or "内置",
             "total": total,
             "accurate": matched,
@@ -207,6 +211,7 @@ def _run_batch(job):
     for idx, (fn, label) in enumerate(items):
         if job["cancel"]:
             job["status"] = "canceled"
+            job["end_ts"] = time.time()
             return
         try:
             path = os.path.join(_LABELED_DIR, job["batch"], fn)
@@ -229,6 +234,7 @@ def _run_batch(job):
         })
         job["processed"] = idx + 1
     job["status"] = "done"
+    job["end_ts"] = time.time()
     _record_history(job)
 
 
@@ -366,9 +372,10 @@ class Handler(BaseHTTPRequestHandler):
         if not blob:
             raise ValueError("图片数据为空")
         model_path = _resolve_model(body.get("model", ""))
+        no_fallback = bool(body.get("no_fallback"))
         from api import CaptchaError
         try:
-            result = _recognize(blob, model_path)
+            result = _recognize(blob, model_path, no_fallback)
         except CaptchaError as e:
             self._send_json({"error": f"图片无效: {e}"}, 400)
             return

@@ -450,10 +450,18 @@ class TestAppleShortcut:
         result = recognize_apple(self.APPLE_LABELED)
         assert result.text == "HSNR"
 
-    def test_apple_gate_blocks_non_apple(self):
-        """苹果专用接口对非苹果图不应让专用模型垃圾结果覆盖内置识别."""
+    def test_apple_default_is_pure_model(self):
+        """默认只用苹果模型自身结果, 不回退内置 ddddocr(与 model_only=True 一致)."""
         from api import recognize_apple
         result = recognize_apple(image_path("test2.jpg"))
+        pure = recognize_apple(image_path("test2.jpg"), model_only=True)
+        assert result.text == pure.text          # 默认即纯模型结果
+        assert result.text != "kdqu"             # 不再回退内置(内置会输出 kdqu)
+
+    def test_apple_gated_fallback_opt_in(self):
+        """传 model_only=False 恢复旧行为: 置信门槛不过时回退内置 ddddocr."""
+        from api import recognize_apple
+        result = recognize_apple(image_path("test2.jpg"), model_only=False)
         assert result.text == "kdqu"
 
     def test_apple_returns_captcha_result(self):

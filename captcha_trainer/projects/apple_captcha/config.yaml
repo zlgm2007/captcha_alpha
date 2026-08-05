@@ -9,7 +9,7 @@ System:
     Allow_Ext: [jpg, jpeg, png, bmp]
     GPU: false
     GPU_ID: 0
-    Path: ../captcha_data/labeled/apple
+    Path: /Users/zhouliang/Desktop/work/github/captcha_alpha/captcha_data/labeled/apple
     Project: apple_captcha
     Val: 0.15
 Train:
@@ -17,7 +17,7 @@ Train:
     CNN: {NAME: ddddocr_beta}
     DROPOUT: 0.3
     LR: 0.001
-    NUM_WORKERS: 4
+    NUM_WORKERS: 0
     OPTIMIZER: SGD
     SAVE_CHECKPOINTS_STEP: 200
     TARGET: {Accuracy: 0.85, Cost: 0.05, Epoch: 20}

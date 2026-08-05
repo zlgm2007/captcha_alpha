@@ -25,3 +25,6 @@ __pycache__/
 *.onnx
 # 例外：苹果验证码专用迁移模型（部署到仓库 models/，随代码入库）
 !models/apple_captcha.onnx
+
+# === 研发日记（本地留存，不提交） ===
+doc/devlog/

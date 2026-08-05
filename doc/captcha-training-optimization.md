@@ -62,7 +62,8 @@ effnetv2_s 那轮还引入了 MPS 加速（M4 Pro 上约 0.48s/步，比单线�
 ```bash
 cd captcha_trainer
 python transfer_pretrained.py --project_name apple_captcha   # 生成 pretrained checkpoint(0_0)
-python app.py train --project_name apple_captcha              # 自动续训(MPS)
+# 训练：集成工作台「模型训练」页（自动续训 MPS），见 README「训练」章节
+python captcha_app/server.py --port 8800
 ```
 
 - 模型约 **7M 参数**（骨干 ~2.5M + LSTM ~4.2M），比 effnetv2_s（19.85M）小，MPS 训练更快。
@@ -73,7 +74,7 @@ python app.py train --project_name apple_captcha              # 自动续训(MPS
 
 端到端验证时发现导出模型在生产路径完全失效，排查出 **3 个 bug**：
 
-1. **导出的是 argmax 索引而非 logits**（`nets/__init__.py` 的 `forward()` 返回 `max(2)[1]`，输出 `(B,T)` 索引）。新版 ddddocr 运行时把二维输出当 logits 二次 argmax → 单字符乱码。修复：`utils/train.py` 导出时用 `ExportNet` 包装，`forward` 返回 `get_features()` 的 logits `(T,B,C)`，由运行时做标准 argmax+CTC 解码。
+1. **导出的是 argmax 索引而非 logits**（`nets/__init__.py` 的 `forward()` 返回 `max(2)[1]`，输出 `(B,T)` 索引）。新版 ddddocr 运行时把二维输出当 logits 二次 argmax → 单字符乱码。修复：导出时用 `ExportNet` 包装，`forward` 返回 `get_features()` 的 logits `(T,B,C)`，由运行时做标准 argmax+CTC 解码（当前实现位于 `captcha_app/trainer_export.py` 的 `export_onnx`）。
 2. **api.py 把专用模型跑在 7 种预处理变体上**（放大2x/提白/去噪/gamma/自适应阈值/CLAHE）。专用模型按训练集格式（原始灰度、等比缩放至高 64、/255）训练，喂增强图全错。修复：`src/api.py` 自定义模型**只吃原图**（原始字节），增强变体仅用于内置 ddddocr。
 3. **多变体投票 + 噪点修复覆盖把正确的自定义结果顶掉**。修复：`src/api.py` 有自定义模型结果时直接作为首选；噪点修复覆盖逻辑仅对无自定义结果时生效（苹果图有噪点块，修复分支会误覆盖）。
 
@@ -86,11 +87,11 @@ python app.py train --project_name apple_captcha              # 自动续训(MPS
 ```bash
 cd captcha_trainer
 # 1. 重生成缓存 + 字符集（数据变化后必做；会重写 config.yaml 字符集）
-python app.py cache --project_name apple_captcha --base_path ../captcha_data/labeled/apple
+#    集成工作台训练页点「准备数据」即可，等价于旧的 cache 命令
 # 2. 首次迁移训练：把 common.onnx 权重转成 torch checkpoint（每次换项目/配置重跑）
 python transfer_pretrained.py --project_name apple_captcha
 # 3. 训练（MPS 自动启用，无需改 GPU 配置；续训自动加载最新 checkpoint）
-python app.py train --project_name apple_captcha
+python captcha_app/server.py --port 8800   # 工作台「模型训练」页
 ```
 
 - **日志**：`projects/apple_captcha/train_transfer.log`（迁移训练）/ `train_effnet.log`（已停的 effnetv2_s 尝试）

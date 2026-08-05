@@ -46,20 +46,99 @@ _ALLOW_EXT = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 _RECOGNIZE_LOCK = threading.RLock()
 # 按 model_path 缓存的识别器(切换模型/不选模型时复用, 避免重复加载)
 _RECOGNIZERS: dict = {}
+# 识别器对应的模型文件指纹 (model_path -> (size, mtime_ns)), 用于感知重新发布
+_RECOGNIZER_SIGS: dict = {}
 # 批跑任务表 {job_id: {...}}
 _JOBS: dict = {}
 _JOBS_LOCK = threading.Lock()
 
 
+def _model_signature(model_path):
+    """模型文件指纹 (size, mtime_ns); 不存在返回 None."""
+    try:
+        st = os.stat(model_path)
+        return (st.st_size, st.st_mtime_ns)
+    except OSError:
+        return None
+
+
 def _get_recognizer(model_path):
-    """按 model_path 缓存 CaptchaRecognizer; "" 表示内置(无专用模型)."""
+    """按 model_path 缓存 CaptchaRecognizer; "" 表示内置(无专用模型).
+
+    若 onnx 文件被重新发布(文件指纹变化), 自动逐出旧引擎缓存并重建识别器,
+    避免批跑/单图识别仍使用内存中的旧权重.
+    """
     with _RECOGNIZE_LOCK:
         rec = _RECOGNIZERS.get(model_path)
+        sig = _model_signature(model_path) if model_path else None
+        if (rec is not None and sig is not None
+                and _RECOGNIZER_SIGS.get(model_path) != sig):
+            # 模型文件已更新(重新发布): 丢弃旧识别器与 ddddocr 引擎缓存
+            _RECOGNIZERS.pop(model_path, None)
+            _RECOGNIZER_SIGS.pop(model_path, None)
+            from ddddocrImg import invalidate_custom
+            invalidate_custom(model_path)
+            print(f"[recognizer] 模型文件已更新, 重新加载: {model_path}", flush=True)
+            rec = None
         if rec is None:
             from api import CaptchaRecognizer
             rec = CaptchaRecognizer(model_path=model_path)
             _RECOGNIZERS[model_path] = rec
+            if sig is not None:
+                _RECOGNIZER_SIGS[model_path] = sig
         return rec
+
+# 历史批跑记录: 仓库根 batch_history.json, 只保留最近 30 条
+_HISTORY_FILE = os.path.join(_REPO_DIR, "batch_history.json")
+_HISTORY_LOCK = threading.Lock()
+_MAX_HISTORY = 30
+
+
+def _load_history():
+    """读历史记录列表(旧→新); 文件缺失/损坏返回空列表."""
+    try:
+        with open(_HISTORY_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _save_history(entry):
+    """追加一条记录, 截断到最近 _MAX_HISTORY 条, 原子写入."""
+    with _HISTORY_LOCK:
+        hist = _load_history()
+        hist.append(entry)
+        hist = hist[-_MAX_HISTORY:]
+        tmp = _HISTORY_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(hist, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, _HISTORY_FILE)
+
+
+def _record_history(job):
+    """批跑完成时写入一条历史记录(日期/模型/总量/准确数/不准确数)."""
+    try:
+        results = job.get("results") or []
+        total = len(results)
+        matched = sum(1 for r in results if r["match"])
+        if total == 0:
+            return
+        _save_history({
+            "date": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "model": job.get("model") or "内置",
+            "total": total,
+            "accurate": matched,
+            "inaccurate": total - matched,
+        })
+    except Exception:
+        pass
+
+
+def _batch_history():
+    """历史批跑记录(新→旧)."""
+    with _HISTORY_LOCK:
+        return list(reversed(_load_history()))
 
 
 def _recognize(blob, model_path=""):
@@ -143,6 +222,7 @@ def _run_batch(job):
         })
         job["processed"] = idx + 1
     job["status"] = "done"
+    _record_history(job)
 
 
 def _active_running_job(batch, model):
@@ -217,6 +297,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_batch_result(query)
             elif path == "/api/batch/jobs":
                 self._api_batch_jobs(query)
+            elif path == "/api/batch/history":
+                self._send_json({"history": _batch_history()})
             elif path == "/api/image":
                 self._api_image(query)
             else:

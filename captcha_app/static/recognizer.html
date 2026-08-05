@@ -140,6 +140,31 @@
   .mark-ok { color: #1a7f37; font-weight: 700; font-size: 16px; }
   .mark-err { color: #cf222e; font-weight: 700; font-size: 16px; }
   .empty { text-align: center; color: #8b949e; padding: 20px; }
+  .history-empty { color: #8b949e; font-size: 13px; text-align: center; padding: 24px 0; }
+  .history-summary { font-size: 13px; color: #57606a; margin-bottom: 12px; }
+  .history-summary b { color: #1a7f37; }
+  .h-row {
+    display: flex; align-items: center; gap: 12px; padding: 8px 0;
+    border-bottom: 1px solid #f0f2f5; font-size: 13px;
+  }
+  .h-row:last-child { border-bottom: none; }
+  .h-meta { width: 240px; flex: none; line-height: 1.5; }
+  .h-date { display: block; font-weight: 600; }
+  .h-model {
+    display: block; font-size: 12px; color: #57606a; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .h-bar {
+    flex: 1; height: 22px; background: #f0f2f5; border-radius: 5px;
+    overflow: hidden; display: flex;
+  }
+  .h-seg { height: 100%; }
+  .h-seg.ok { background: #2da44e; }
+  .h-seg.bad { background: #d1242f; }
+  .h-nums { width: 150px; flex: none; text-align: right; font-variant-numeric: tabular-nums; }
+  .h-nums .acc { color: #1a7f37; font-weight: 600; }
+  .h-nums .mis { color: #cf222e; font-weight: 600; }
+
 </style>
 </head>
 <body>
@@ -229,6 +254,16 @@
   </div>
 </div>
 
+<!-- 第四块：历史批跑结果展示 -->
+<div class="card block wide">
+  <h2><span class="num">4</span>历史批跑结果展示</h2>
+  <p class="sub">最近 30 条完成的批量测试（本地 <code>batch_history.json</code> 保存）</p>
+  <div id="historyWrap">
+    <div class="history-empty" id="historyEmpty">暂无批跑记录，完成一次批量测试后自动记录。</div>
+    <div id="historyChart"></div>
+  </div>
+</div>
+
 <script>
 const $ = s => document.querySelector(s);
 let currentFile = null;
@@ -267,6 +302,7 @@ async function loadMeta() {
 }
 loadMeta();
 loadJobs();
+renderHistory();
 
 // ---- 单图识别 ----
 $("#drop").addEventListener("click", () => $("#file").click());
@@ -435,6 +471,7 @@ async function loadResult() {
   resetBatchUI();
   renderTable();
   loadJobs();
+  renderHistory();
 }
 
 function resetBatchUI() {
@@ -557,6 +594,42 @@ $("#activeJobsList").addEventListener("click", e => {
 
 $("#modelSel").addEventListener("change", () => updateStartDisabled(lastJobs));
 $("#batchSel").addEventListener("change", () => updateStartDisabled(lastJobs));
+
+// ---- 历史批跑结果展示（第 4 块） ----
+async function renderHistory() {
+  try {
+    const r = await fetch("/rec/api/batch/history");
+    if (!r.ok) return;
+    const d = await r.json();
+    const h = d.history || [];
+    const empty = $("#historyEmpty");
+    const chart = $("#historyChart");
+    if (!h.length) {
+      empty.style.display = "block";
+      chart.innerHTML = "";
+      return;
+    }
+    empty.style.display = "none";
+    const okSum = h.reduce((s, x) => s + x.accurate, 0);
+    const totalSum = h.reduce((s, x) => s + x.total, 0);
+    const avgAcc = totalSum ? (okSum / totalSum * 100) : 0;
+    const rows = h.map(x => {
+      const pctOk = x.total ? (x.accurate / x.total * 100) : 0;
+      const pctBad = x.total ? (x.inaccurate / x.total * 100) : 0;
+      return `<div class="h-row">
+        <div class="h-meta"><span class="h-date">${esc(x.date)}</span><span class="h-model" title="${esc(x.model)}">${esc(x.model)}</span></div>
+        <div class="h-bar">
+          <div class="h-seg ok" style="width:${pctOk}%" title="准确 ${x.accurate}"></div>
+          <div class="h-seg bad" style="width:${pctBad}%" title="不准确 ${x.inaccurate}"></div>
+        </div>
+        <div class="h-nums"><span class="acc">${x.accurate}</span> / <span class="mis">${x.inaccurate}</span>　·　${pctOk.toFixed(1)}%</div>
+      </div>`;
+    }).join("");
+    chart.innerHTML = `<div class="history-summary">近 ${h.length} 次 · 累计 ${totalSum} 张 · 平均一致率 <b>${avgAcc.toFixed(1)}%</b></div>` + rows;
+  } catch (e) {
+    console.error(e);
+  }
+}
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g,

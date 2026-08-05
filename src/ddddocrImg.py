@@ -42,6 +42,11 @@ def get_engine(beta=True, import_onnx_path="", charsets_path=""):
     return _ENGINES[key]
 
 
+def invalidate_custom(path):
+    """自定义模型文件被重新发布后, 逐出对应引擎缓存, 使下次 get_engine 重新加载."""
+    _ENGINES.pop(f"custom:{os.path.abspath(path)}", None)
+
+
 def to_bytes(image):
     """把 路径/bytes/ndarray 统一转为图片字节."""
     if isinstance(image, (bytes, bytearray)):

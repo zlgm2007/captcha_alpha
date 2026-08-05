@@ -35,6 +35,31 @@
   .grid { display:grid; grid-template-columns:1fr 1fr; gap:8px 12px; }
   .grid label { display:flex; flex-direction:column; gap:3px; }
   .grid input { width:100%; }
+  .cap { display:flex; align-items:center; gap:5px; }
+  .qmark { width:16px; height:16px; padding:0; border-radius:50%; background:var(--accent);
+           border:none; color:#fff; font-size:11px; line-height:16px; text-align:center;
+           cursor:pointer; flex:none; }
+  .qmark:hover { background:#1f5fd0; }
+  [hidden] { display:none !important; }
+  .modal-mask { position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex;
+                align-items:center; justify-content:center; z-index:100; }
+  .modal { background:#fff; border-radius:10px; max-width:780px; width:92%; max-height:82vh;
+           overflow:auto; padding:16px 18px; box-shadow:0 8px 30px rgba(0,0,0,.2); }
+  .modal-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+  .modal-head h3 { font-size:15px; }
+  .modal-close { border:none; background:none; font-size:22px; line-height:1; cursor:pointer;
+                 color:var(--muted); padding:2px 6px; }
+  .modal-close:hover { color:var(--text); }
+  .modal-body { font-size:13px; line-height:1.75; color:var(--text); }
+  .modal-body h4 { margin:10px 0 4px; font-size:13px; color:#24292f; }
+  .modal-body table { width:100%; border-collapse:collapse; margin:8px 0 10px; }
+  .modal-body th, .modal-body td { border:1px solid var(--border); padding:6px 8px;
+                                    text-align:left; font-size:12px; vertical-align:top; }
+  .modal-body th { background:#f6f8fa; white-space:nowrap; }
+  .modal-body .tip { background:#f6f8fa; border-left:3px solid var(--accent); padding:8px 10px;
+                     border-radius:4px; margin:8px 0; }
+  .modal-body code { background:#f6f8fa; border:1px solid var(--border); border-radius:4px;
+                     padding:0 4px; font-size:12px; }
   .actions { margin-top:12px; display:flex; gap:8px; align-items:center; }
   #stateTag { font-weight:700; padding:3px 10px; border-radius:20px; font-size:12px; }
   #stateTag.idle { background:#eaeef2; color:#57606a; }
@@ -88,7 +113,7 @@
       <label>验证步长 TEST_STEP <input type="number" id="test_step"></label>
       <label>存档步长 SAVE_STEP <input type="number" id="save_step"></label>
       <label>加载线程 NUM_WORKERS <input type="number" id="num_workers"></label>
-      <label>骨干 CNN <select id="cnn">
+      <label><span class="cap"><span>骨干 CNN</span><button type="button" class="qmark" id="btnCnnHelp" title="点击查看骨干 CNN 说明">?</button></span><select id="cnn">
         <option>ddddocr_beta</option><option>ddddocr</option>
         <option>effnetv2_s</option><option>effnetv2_m</option><option>mobilenetv3_s</option>
       </select></label>
@@ -142,6 +167,31 @@
   </div>
   <div id="ckptList"></div>
 </section>
+
+<div id="cnnModal" class="modal-mask" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <h3>骨干 CNN 说明</h3>
+      <button type="button" class="modal-close" id="btnCnnClose" title="关闭">×</button>
+    </div>
+    <div class="modal-body">
+      <p>骨干 CNN 是模型的特征提取前端，后面统一接 <b>双向 LSTM → CTC</b> 解码。骨干只负责"从图里抽出有效特征"，其质量直接决定识别上限。</p>
+      <table>
+        <tr><th>骨干</th><th>结构</th><th>特点</th></tr>
+        <tr><td>ddddocr_beta</td><td>21 层稠密 Conv + hswish + 残差，输入高度固定 64</td><td>与 ddddocr 新版 common.onnx 同款；<b>唯一支持迁移学习</b>（从预训练权重微调）</td></tr>
+        <tr><td>ddddocr</td><td>7 层 Conv（16→128 通道）+ ReLU + MaxPool</td><td>最简经典 CRNN 骨干，容量最小</td></tr>
+        <tr><td>effnetv2_s</td><td>EfficientNetV2-Small，6 个 stage 的 MBConv + SE</td><td>现代轻量骨干，容量小→中</td></tr>
+        <tr><td>effnetv2_m</td><td>EfficientNetV2-Medium，7 个 stage，SE 更密集（最大通道 512）</td><td>容量最大、理论上限最高，也最慢、最易在小数据上过拟合</td></tr>
+        <tr><td>mobilenetv3_s</td><td>MobileNetV3-Small，11 个 MBConv Block + hswish + SE</td><td>极致轻量，最大通道 96，速度最快</td></tr>
+      </table>
+      <h4>关键：只有 ddddocr_beta 有预训练权重</h4>
+      <p>项目内置迁移逻辑（勾选「迁移学习初始化」）只支持 <code>ddddocr_beta</code> 且 <b>输入高度 = 64</b>：会把 ddddocr 官方 <code>common.onnx</code> 的骨干 + LSTM 权重直接载入，只重新训练 fc 分类层。其余 4 个骨干项目内无预训练来源，选择后为<b>随机初始化从零训练</b>。</p>
+      <div class="tip">
+        <b>建议：</b>数据量小时（几百到一千张），迁移的 <code>ddddocr_beta</code> 通常明显优于任何从零训的模型——这也是当前 apple 批次（批跑一致率 ~0.89）的选型。若想换骨干实验，从零训首选 <code>effnetv2_s</code> 或 <code>mobilenetv3_s</code>（更稳妥）；<code>effnetv2_m</code> 需要更大数据量 + 增广才可能体现优势。判断标准以「全量批跑匹配率」为准（验证集数字偏乐观）。
+      </div>
+    </div>
+  </div>
+</div>
 
 <script>
 "use strict";
@@ -375,6 +425,13 @@ async function init() {
   $("btnStop").addEventListener("click", stopTrain);
   $("btnExport").addEventListener("click", doExport);
   $("btnPublish").addEventListener("click", doPublish);
+  /* 骨干 CNN 说明弹窗 */
+  $("btnCnnHelp").addEventListener("click", e => {
+    e.preventDefault(); e.stopPropagation(); $("cnnModal").hidden = false;
+  });
+  $("btnCnnClose").addEventListener("click", () => $("cnnModal").hidden = true);
+  $("cnnModal").addEventListener("click", e => { if (e.target === $("cnnModal")) $("cnnModal").hidden = true; });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") $("cnnModal").hidden = true; });
   pollStatus();
 }
 init();

@@ -28,3 +28,6 @@ __pycache__/
 
 # === 研发日记（本地留存，不提交） ===
 doc/devlog/
+
+# === 运行时状态（本地生成，不提交） ===
+batch_history.json

@@ -13,9 +13,9 @@
 两个快捷入口的选用:
   - recognize(image):     通用验证码, 不传模型, 走内置多策略投票; 传模型 + no_fallback/
                           model_only 时不回退(仅在选了模型时生效)
-  - recognize_apple(image): 苹果来源验证码, 自动加载专用迁移模型, 默认只用苹果模型
-                          自身结果(不回退); 传 model_only=False 恢复 gap_min>=0.08
-                          置信门槛 + 非苹果图自动退回内置投票
+  - recognize_apple(image): 苹果来源验证码, 固定加载 models/apple_captcha.onnx,
+                          默认只用苹果模型自身结果(不回退); 传 model_only=False 走
+                          gap_min>=0.08 置信门槛 + 非苹果图自动退回内置投票
 
 支持的图片输入类型:
   - str / pathlib.Path:  文件路径
@@ -502,30 +502,25 @@ def recognize(image: ImageInput, length: Optional[int] = None,
 
 
 def recognize_apple(image: ImageInput, length: Optional[int] = None,
-                    model_path: str = APPLE_MODEL_PATH, charsets_path: str = "",
                     model_only: bool = True, **kwargs) -> CaptchaResult:
-    """苹果验证码专用识别快捷函数 (自动加载 models/apple_captcha.onnx).
+    """苹果验证码专用识别 (固定加载 models/apple_captcha.onnx, 不可换模型).
 
-    默认 model_only=True: 只跑苹果专用模型自身结果, 不回退内置 ddddocr 投票
-    (结果即模型预测, 对非苹果图也会给出模型自己的猜测, 不保证正确).
-    传 model_only=False 恢复旧行为: 自定义结果经 gap_min>=0.08 置信门槛后优先,
-    对非苹果图(模型不确定、gap 低)自动退回内置 ddddocr 多策略投票.
-    首次调用时创建苹果专用识别器并缓存, 后续复用.
+    默认 model_only=True: 只跑苹果专用模型自身结果, 不回退内置 ddddocr.
+    结果即模型预测: 对苹果图识别准确; 对非苹果图模型也会给出自身猜测(可能不正确).
+    传 model_only=False: 结果经 gap_min>=0.08 置信门槛后优先, 门槛不过(非苹果图)
+    自动退回内置 ddddocr 多策略投票, 与识别页 /api/recognize 选中该模型一致.
 
     Args:
             image:      图片输入 (路径 / bytes / ndarray)
             length:     期望验证码长度
-            model_path: 专用模型 onnx 路径 (默认 models/apple_captcha.onnx)
-            charsets_path: 模型字符集 json (默认取模型同目录 charsets.json)
-            model_only: 默认 True=只用苹果模型(不回退); False=走置信门槛+回退
-            **kwargs:   传递给 CaptchaRecognizer.recognize() 的参数
+            model_only: 默认 True=只用苹果模型(不回退); False=置信门槛+回退
+            **kwargs:   传递给 CaptchaRecognizer.recognize() 的其他参数
 
     Returns:
             CaptchaResult
     """
     global _apple_recognizer
-    if _apple_recognizer is None or model_path != _apple_recognizer.model_path:
-        _apple_recognizer = CaptchaRecognizer(model_path=model_path,
-                                              charsets_path=charsets_path)
+    if _apple_recognizer is None:
+        _apple_recognizer = CaptchaRecognizer(model_path=APPLE_MODEL_PATH)
     return _apple_recognizer.recognize(image, length=length,
                                        model_only=model_only, **kwargs)

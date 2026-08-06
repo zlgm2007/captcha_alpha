@@ -232,6 +232,26 @@ def _extract_archive(blob, ext, target_dir):
     raise ValueError("仅支持 .zip 或 .7z")
 
 
+def move_labeled_to_unrecognized(data_root, name, filename):
+    """把已标记的图移入无法识别目录.
+
+    去掉标签前缀恢复原文件名(unrecognizable 下存原文件名), 冲突时追加后缀.
+    """
+    src = _safe_join(data_root, "labeled", name, filename)
+    if not os.path.isfile(src):
+        raise ValueError(f"已标记文件不存在: {filename}")
+    _, original = parse_labeled(filename)
+    if not original:
+        original = filename
+    original = sanitize_filename(original)
+    unrec_dir = _safe_join(data_root, "unrecognizable", name)
+    os.makedirs(unrec_dir, exist_ok=True)
+    used = set(os.listdir(unrec_dir)) if os.path.isdir(unrec_dir) else set()
+    dst_name = _dedup_name(unrec_dir, original, used)
+    os.replace(src, os.path.join(unrec_dir, dst_name))
+    return dst_name
+
+
 # ---------- OCR 预填(可选, 懒加载) ----------
 
 _OCR = {"preprocess": None, "recognize": None, "lock": threading.Lock()}
@@ -369,6 +389,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_save_label()
             elif path == "/api/modify_label":
                 self._api_modify_label()
+            elif path == "/api/unrecognize_labeled":
+                self._api_unrecognize_labeled()
             elif path == "/api/unrecognize":
                 self._api_unrecognize()
             elif path == "/api/relabel_unrecognized":
@@ -592,6 +614,15 @@ class Handler(BaseHTTPRequestHandler):
         self._require_dir(name)
         unrec_dir = _safe_join(self.data_root, "unrecognizable", name)
         self._send_json({"files": _image_files(unrec_dir)})
+
+    def _api_unrecognize_labeled(self):
+        """把已标记的图移入无法识别目录."""
+        body = self._read_json()
+        name = body.get("dir", "")
+        self._require_dir(name)
+        filename = os.path.basename(body.get("filename", ""))
+        dst_name = move_labeled_to_unrecognized(self.data_root, name, filename)
+        self._send_json({"ok": True, "filename": dst_name})
 
     def _api_unrecognize(self):
         """把未标记的图移入无法识别目录(保留原文件名, 冲突时追加后缀)."""

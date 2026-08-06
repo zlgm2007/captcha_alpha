@@ -155,6 +155,7 @@
       <img id="editPreview" alt="" style="display:none">
       <input id="editInput" autocomplete="off" spellcheck="false" placeholder="新标签">
       <button id="btnModify" class="primary">保存修改 (Enter)</button>
+      <button id="btnUnrecLabeled">保存为无法识别</button>
       <div id="editInfo">点击左侧图片以修改标签</div>
     </div>
   </section>
@@ -502,17 +503,18 @@ function renderGrid() {
 function showEdit(it) {
   const img = $("#editPreview");
   const input = $("#editInput");
+  const unrecBtn = $("#btnUnrecLabeled");
   if (!it || !state.dir) {
     img.style.display = "none";
     input.value = "";
-    input.disabled = true; $("#btnModify").disabled = true;
+    input.disabled = true; $("#btnModify").disabled = true; unrecBtn.disabled = true;
     setEditInfo(it ? "" : "点击左侧图片以修改标签");
     return;
   }
   img.src = imgUrl("labeled", state.dir, it.filename, 2);
   img.style.display = "block";
   input.value = it.label;
-  input.disabled = false; $("#btnModify").disabled = false;
+  input.disabled = false; $("#btnModify").disabled = false; unrecBtn.disabled = false;
   setEditInfo(`${it.filename}\n原文件名: ${it.original || "-"}`);
   input.focus();
 }
@@ -530,6 +532,19 @@ async function modifyLabel() {
     refreshDirsCount();
     setEditInfo("已修改: " + d.saved);
   } catch (e) { setEditInfo("修改失败: " + e.message); }
+}
+
+async function unrecognizeLabeled() {
+  if (!state.dir || !state.selLabeled) return;
+  const filename = state.selLabeled;
+  try {
+    const d = await post("/api/unrecognize_labeled", { dir: state.dir, filename });
+    await loadLabeled();
+    state.selLabeled = state.labeled.length ? state.labeled[0].filename : null;
+    renderGrid();
+    refreshDirsCount();
+    setEditInfo("已移入无法识别: " + d.filename);
+  } catch (e) { setEditInfo("移入失败: " + e.message); }
 }
 
 /* ---------- 无法识别标注 ---------- */
@@ -689,6 +704,7 @@ $("#editInput").addEventListener("input", e => {
   if (state.cfg.uppercase) e.target.value = e.target.value.toUpperCase();
 });
 $("#btnModify").addEventListener("click", modifyLabel);
+$("#btnUnrecLabeled").addEventListener("click", unrecognizeLabeled);
 $("#btnUnrecSave").addEventListener("click", saveUnrecognized);
 $("#btnUnrecReturn").addEventListener("click", returnUnrecognized);
 $("#unrecInput").addEventListener("keydown", e => { if (e.key === "Enter") saveUnrecognized(); });

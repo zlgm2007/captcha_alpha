@@ -459,10 +459,16 @@ class TestAppleShortcut:
         assert result.text != "kdqu"             # 不再回退内置(内置会输出 kdqu)
 
     def test_apple_gated_fallback_opt_in(self):
-        """传 model_only=False 恢复旧行为: 置信门槛不过时回退内置 ddddocr."""
+        """传 model_only=False: 苹果模型置信门槛不过时回退内置 ddddocr.
+
+        用 test3.png(苹果模型 gap<0.08, 不确定)验证回退生效; test2.jpg 上
+        当前苹果模型已确信(gap>=0.08), 不会回退, 不适合测该路径.
+        """
         from api import recognize_apple
-        result = recognize_apple(image_path("test2.jpg"), model_only=False)
-        assert result.text == "kdqu"
+        pure = recognize_apple(image_path("test3.png"))
+        result = recognize_apple(image_path("test3.png"), model_only=False)
+        assert result.text != pure.text                     # 回退已生效, 非纯模型结果
+        assert any(c.label.startswith("增强(") for c in result.candidates)
 
     def test_apple_returns_captcha_result(self):
         """苹果专用接口应返回 CaptchaResult 类型."""

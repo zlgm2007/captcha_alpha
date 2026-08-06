@@ -202,6 +202,13 @@ class LabelerAPI:
         os.replace(src, dst)
         return _json({"ok": True, "saved": os.path.basename(dst)})
 
+    def _post_unrecognize_labeled(self, body):
+        name = body.get("dir", "")
+        self._require_dir(name)
+        filename = os.path.basename(body.get("filename", ""))
+        dst_name = lbl.move_labeled_to_unrecognized(self.data_root, name, filename)
+        return _json({"ok": True, "filename": dst_name})
+
     def _post_unrecognize(self, body):
         name = body.get("dir", "")
         self._require_dir(name)
@@ -329,6 +336,7 @@ class LabelerAPI:
         "dirs/create": _post_dir_create,
         "save_label": _post_save_label,
         "modify_label": _post_modify_label,
+        "unrecognize_labeled": _post_unrecognize_labeled,
         "unrecognize": _post_unrecognize,
         "relabel_unrecognized": _post_relabel_unrecognized,
         "return_unrecognized": _post_return_unrecognized,

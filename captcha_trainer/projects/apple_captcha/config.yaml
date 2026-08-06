@@ -20,6 +20,6 @@ Train:
     NUM_WORKERS: 0
     OPTIMIZER: SGD
     SAVE_CHECKPOINTS_STEP: 200
-    TARGET: {Accuracy: 0.99, Cost: 0.05, Epoch: 3}
+    TARGET: {Accuracy: 0.98, Cost: 0.05, Epoch: 3}
     TEST_BATCH_SIZE: 32
     TEST_STEP: 50

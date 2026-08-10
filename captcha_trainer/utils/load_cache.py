@@ -111,31 +111,36 @@ class LoadCache(Dataset):
             return None, None
 
     def _augment(self, image):
-        """数据增强(仅训练集): 几何仿射/透视 + 模糊 + 高斯噪声 + 亮度/对比度/锐度抖动.
-        数据全是通用模型认不出的难样本, 增强需更强才压得住过拟合."""
-        if random.random() < 0.9:
-            affine = torchvision.transforms.RandomAffine(degrees=8, translate=(0.05, 0.05), scale=(0.9, 1.1), shear=4)
-            image = affine(image)
-        if random.random() < 0.35:
-            perspective = torchvision.transforms.RandomPerspective(distortion_scale=0.12, p=1.0)
-            image = perspective(image)
-        if random.random() < 0.3:
-            blur = torchvision.transforms.GaussianBlur(3, sigma=(0.1, 1.2))
-            image = blur(image)
-        if random.random() < 0.35:
-            image = self._add_noise(image)
-        if random.random() < 0.9:
-            image = ImageEnhance.Brightness(image).enhance(random.uniform(0.75, 1.25))
-            image = ImageEnhance.Contrast(image).enhance(random.uniform(0.75, 1.25))
+        """数据增强(仅训练集): 中等强度几何/光度抖动.
+
+        2026-08-10 实验结论: 在中等基础上调强(度6/trans0.05/σ6/±20%)实测全验证集反而
+        从 92.6% 跌到 90.1%(训练分布离干净验证集更远), 故回退到中等强度(度4/trans0.03/
+        σ4/±15%). 曾导致 249 epoch 学不动的强增强(仿射 p0.9 + ±25%)仍不可用.
+        """
         if random.random() < 0.5:
-            image = ImageEnhance.Sharpness(image).enhance(random.uniform(0.5, 1.5))
+            affine = torchvision.transforms.RandomAffine(
+                degrees=4, translate=(0.03, 0.03), scale=(0.95, 1.05), shear=2)
+            image = affine(image)
+        if random.random() < 0.2:
+            perspective = torchvision.transforms.RandomPerspective(distortion_scale=0.08, p=1.0)
+            image = perspective(image)
+        if random.random() < 0.2:
+            blur = torchvision.transforms.GaussianBlur(3, sigma=(0.1, 0.6))
+            image = blur(image)
+        if random.random() < 0.2:
+            image = self._add_noise(image)
+        if random.random() < 0.6:
+            image = ImageEnhance.Brightness(image).enhance(random.uniform(0.85, 1.15))
+            image = ImageEnhance.Contrast(image).enhance(random.uniform(0.85, 1.15))
+        if random.random() < 0.3:
+            image = ImageEnhance.Sharpness(image).enhance(random.uniform(0.7, 1.3))
         return image
 
     def _add_noise(self, image):
         """高斯加性噪声(灰度 L 模式, numpy 实现, 无新依赖)."""
         import numpy as np
         arr = np.asarray(image).astype(np.float32)
-        arr = np.clip(arr + np.random.normal(0, 8, arr.shape), 0, 255).astype(np.uint8)
+        arr = np.clip(arr + np.random.normal(0, 4, arr.shape), 0, 255).astype(np.uint8)
         return Image.fromarray(arr, mode=image.mode)
 
 

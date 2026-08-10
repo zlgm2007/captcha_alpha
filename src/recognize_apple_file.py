@@ -8,8 +8,8 @@
     python src/recognize_apple_file.py <图片路径> [--length N] [--fallback]
 
     --length N   期望验证码长度(默认自动推断)
-    --fallback   走 gap_min>=0.08 置信门槛, 非苹果图回退内置 ddddocr
-                 (默认纯苹果模型自身结果, 不回退)
+    --fallback   兼容参数: 2026-08-10 起选中模型始终走模型自身结果, 不再有
+                 gap_min 置信门槛回退, 该参数不再改变行为(默认即纯模型)
 
 import 用法:
     from recognize_apple_file import recognize_apple_file
@@ -30,7 +30,7 @@ def recognize_apple_file(path, length=None, **kwargs):
     Args:
         path:   本地图片文件路径 (str / pathlib.Path)
         length: 期望验证码长度, None 自动推断
-        **kwargs: 透传给 api.recognize_apple (如 model_only=False 走门槛+回退)
+        **kwargs: 透传给 api.recognize_apple
 
     Returns:
         dict: {"text", "confidence", "length",
@@ -57,7 +57,7 @@ def main():
     parser.add_argument("image", help="本地图片文件路径")
     parser.add_argument("--length", type=int, default=None, help="期望验证码长度(默认自动)")
     parser.add_argument("--fallback", action="store_true",
-                        help="走 gap_min>=0.08 置信门槛+回退(默认纯苹果模型)")
+                        help="兼容参数, 不再改变行为(选模型即走模型自身结果)")
     args = parser.parse_args()
 
     kwargs = {}

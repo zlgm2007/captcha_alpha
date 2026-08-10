@@ -80,16 +80,19 @@ class TrainerEngine:
 
     # ---- 数据准备(cache + 可选迁移初始化/重置) ----
 
-    def prepare(self, project, data_path, hyperparams, transfer=False, reset=False):
-        """后台线程: 重生成 cache + 改写 config.yaml, 可选迁移初始化/清空旧 checkpoint."""
+    def prepare(self, project, data_path, hyperparams, transfer=False, reset=False, merge=False):
+        """后台线程: 重生成 cache + 改写 config.yaml, 可选迁移初始化/清空旧 checkpoint.
+
+        merge=True 时合并 base_path 下全部子目录批次(cache 记录 <批次>/<文件> 相对路径).
+        """
         self.project = project
         self.state = "preparing"
         self.reason = "正在准备数据"
         self.thread = self._thread(lambda: self._do_prepare(
-            data_path, hyperparams, transfer, reset))
+            data_path, hyperparams, transfer, reset, merge))
         return True
 
-    def _do_prepare(self, data_path, hyperparams, transfer, reset):
+    def _do_prepare(self, data_path, hyperparams, transfer, reset, merge=False):
         self._init_log_sink()
         old_cwd = os.getcwd()
         try:
@@ -108,10 +111,19 @@ class TrainerEngine:
             # cache 先跑: 会按标记数据统计重写 CharSet(数据驱动), 迁移初始化必须在其后
             # 用新字符集构建 fc, 否则生成的 checkpoint 输出维度与训练时的 Net 不匹配.
             cacher = cache_data.CacheData(self.project)
-            cacher.cache(data_path)
+            cacher.cache(data_path, merge_subdirs=merge)
             if transfer:
                 conf = Config(self.project).load_config()
                 self._transfer_init(conf)
+                # 迁移 0_0 不是最新 step 时会被旧 checkpoint 顶掉(未勾 reset), 明确警告
+                ckpt_dir = os.path.join(TRAINER_DIR, "projects", self.project, "checkpoints")
+                others = [f for f in os.listdir(ckpt_dir)
+                          if f.endswith(".tar") and not f.endswith("_0_0.tar")]
+                if others:
+                    logger.warning(
+                        "已生成迁移初始化 0_0, 但 checkpoints/ 仍有 {} 个旧 checkpoint(未勾"
+                        "「清空旧 checkpoint」). 续训将加载 step 最大的旧 checkpoint, 迁移权重不会"
+                        "生效; 如需用迁移权重, 请勾选「清空旧 checkpoint」后重新准备数据".format(len(others)))
             logger.info(f"数据准备完成: {data_path}")
             self.state = "idle"
             self.reason = ""
@@ -194,6 +206,10 @@ class TrainerEngine:
             conf = self._merge_hyperparams(conf, hyperparams)
             Config(self.project).make_config(config_dict=conf,
                                              single=conf['Model'].get('Word', False))
+            if float(conf['Train'].get('DROPOUT', 0)) > 0:
+                logger.warning(
+                    "config DROPOUT={} 对 num_layers=1 的 BiLSTM 静默无效(PyTorch 忽略 dropout), "
+                    "界面已移除该参数, 此处忽略".format(conf['Train'].get('DROPOUT', 0)))
 
             project_path = os.path.join(TRAINER_DIR, "projects", self.project)
             ckpt_dir = os.path.join(project_path, "checkpoints")
@@ -220,6 +236,15 @@ class TrainerEngine:
                 logger.info(f"续训 checkpoint: {newest} (epoch {epoch} step {step})")
             net = Net(conf, lr=lr)
             if state_dict:
+                # 续训前校验 fc 输出维度: 数据批次/字符集变化会导致 checkpoint 与新 Net 不兼容,
+                # 这里给出明确报错而不是 cryptic 的 load_state_dict shape mismatch.
+                fc_w = state_dict.get('fc.weight')
+                if fc_w is not None and fc_w.shape[0] != net.fc.out_features:
+                    raise ValueError(
+                        "checkpoint {} 的 fc 输出维度({}) 与当前数据字符集({}) 不一致(数据批次或"
+                        "字符集已变化). 请重新「准备数据」并勾选「迁移学习初始化」, 或勾选"
+                        "「清空旧 checkpoint」从零训练".format(
+                            newest, fc_w.shape[0], net.fc.out_features))
                 net.load_state_dict(state_dict)
             net = net.to(device)
 
@@ -294,6 +319,11 @@ class TrainerEngine:
                         net.scheduler.step()
                         ckpt = os.path.join(ckpt_dir,
                                             f"checkpoint_{self.project}_{epoch}_{step}.tar")
+                        # 文件名无 run 标识, 新 run 跑同 (epoch,step) 会覆盖旧文件, 覆盖前告警
+                        if os.path.exists(ckpt):
+                            logger.warning(
+                                "覆盖已有 checkpoint(新 run 复用了同 (epoch,step) 文件名, 旧文件丢失): "
+                                + ckpt)
                         net.save_model(ckpt, {"net": net.state_dict(),
                                               "optimizer": net.optimizer.state_dict(),
                                               "epoch": epoch, "step": step, "lr": lr})
@@ -306,17 +336,32 @@ class TrainerEngine:
                         logger.info(self.reason)
                         self._finalize_eval(net, val_loader)
                         return
-                    if last_acc > target_acc and epoch > min_epoch:
-                        self.state = "done"
-                        self.reason = f"达到目标: 验证准确率 {last_acc:.4f} > {target_acc}"
-                        logger.info(self.reason + ", 正在导出模型...")
+                    # 自动停止: 单批 val 噪声大(±3点), 只在 TEST_STEP 用全验证集复核, 通过才停/导出.
+                    # 导出文件名用全量 acc(此前用单批噪声值, 与最终 final_acc 不符).
+                    if step % test_step == 0 and last_acc > target_acc and epoch > min_epoch:
                         try:
-                            self.last_export = self._export_live(net, conf, models_dir,
-                                                                 last_acc, epoch, step)
+                            real_acc = full_eval(net, val_loader)
                         except Exception as e:
-                            logger.error(f"自动导出失败: {e}")
-                        self._finalize_eval(net, val_loader)
-                        return
+                            logger.warning(f"全验证集复核失败, 本轮不停止: {e}")
+                            real_acc = None
+                        if real_acc is not None:
+                            self.progress["val_acc"] = round(real_acc, 4)
+                            if real_acc > target_acc:
+                                self.state = "done"
+                                self.reason = f"达到目标: 全验证集准确率 {real_acc:.4f} > {target_acc}"
+                                self.final_acc = round(real_acc, 4)
+                                logger.info(self.reason + ", 正在导出模型...")
+                                try:
+                                    self.last_export = self._export_live(
+                                        net, conf, models_dir, real_acc, epoch, step)
+                                except Exception as e:
+                                    logger.error(f"自动导出失败: {e}")
+                                return
+                            else:
+                                # 单批噪声越过目标但全验证集未过: 明确记录, 避免误以为应停止
+                                logger.info(
+                                    f"单批 val {last_acc:.4f} 越过目标 {target_acc}, "
+                                    f"但全验证集复核 {real_acc:.4f} ≤ 目标, 继续训练")
                 epoch += 1
         except Exception as e:
             import traceback

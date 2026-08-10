@@ -125,10 +125,28 @@ class CacheData:
         else:
             logger.error("val setting vaild!")
             exit()
-        random.shuffle(caches)
-        train_set = caches[val_num:]
-        val_set = caches[:val_num]
+        # 持久化验证集: 验证集文件名列表存 cache.val.list, 下次 prepare 保持已有验证样本
+        # 不变(新增数据只进 train, 验证集不足时才从新样本随机补齐到目标比例), 使跨 prepare
+        # 的训练/验证切分稳定, 各轮评估和训练 loop val_acc 才可比. 以前每次 random.shuffle
+        # 都换一批新验证集, 跨 run 对比全是切分噪声(曾把同一 checkpoint 测成 92.6% 和 99.1%).
+        # 注意: 若想把旧验证集彻底换新, 删除 cache.val.list 后重新 prepare 即可.
+        caches = sorted(caches)  # 固定顺序, 保证同数据重复 prepare 产出完全相同的 cache
+        val_list_path = os.path.join(self.cache_path, "cache.val.list")
+        prev_val_names = set()
+        if os.path.isfile(val_list_path):
+            with open(val_list_path, "r", encoding="utf-8") as f:
+                prev_val_names = {ln.strip() for ln in f if ln.strip()}
+        keep_val = [c for c in caches if c.split("\t")[0] in prev_val_names]
+        new_pool = [c for c in caches if c.split("\t")[0] not in prev_val_names]
+        if len(keep_val) < val_num and new_pool:
+            random.shuffle(new_pool)
+            keep_val += new_pool[: val_num - len(keep_val)]
+        val_set = keep_val[:val_num]
+        val_names = {c.split("\t")[0] for c in val_set}
+        train_set = [c for c in caches if c.split("\t")[0] not in val_names]
         del caches
+        with open(val_list_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(c.split("\t")[0] for c in val_set))
         with open(os.path.join(self.cache_path, "cache.train.tmp"), 'w', encoding="utf-8") as f:
             f.write("\n".join(train_set))
         with open(os.path.join(self.cache_path, "cache.val.tmp"), 'w', encoding="utf-8") as f:

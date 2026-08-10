@@ -164,6 +164,15 @@ def _dedup_name(target_dir, fname, used):
         i += 1
 
 
+def _touch(path):
+    """把文件 mtime 刷新为当前时间.
+
+    os.replace 保留源文件时间戳, 导致标记/移动后文件仍带着最初导入的 mtime,
+    无法按操作时间排序定位错误标注. 标记类操作后调用它让 mtime 反映操作时刻.
+    """
+    os.utime(path, None)
+
+
 def _extract_zip(blob, target_dir):
     """解压 .zip(标准库), 只取图片, 压平到 target_dir; 防 zip-slip 与体积炸弹."""
     zf = zipfile.ZipFile(io.BytesIO(blob))
@@ -248,7 +257,9 @@ def move_labeled_to_unrecognized(data_root, name, filename):
     os.makedirs(unrec_dir, exist_ok=True)
     used = set(os.listdir(unrec_dir)) if os.path.isdir(unrec_dir) else set()
     dst_name = _dedup_name(unrec_dir, original, used)
-    os.replace(src, os.path.join(unrec_dir, dst_name))
+    dst = os.path.join(unrec_dir, dst_name)
+    os.replace(src, dst)
+    _touch(dst)
     return dst_name
 
 
@@ -518,6 +529,7 @@ class Handler(BaseHTTPRequestHandler):
         dst = _safe_join(self.data_root, "labeled", name, f"{label}_{original}")
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         os.replace(src, dst)
+        _touch(dst)
         self._send_json({"ok": True, "saved": os.path.basename(dst)})
 
     def _api_modify_label(self):
@@ -538,6 +550,7 @@ class Handler(BaseHTTPRequestHandler):
         dst = _safe_join(self.data_root, "labeled", name,
                          f"{label}_{original}")
         os.replace(src, dst)
+        _touch(dst)
         self._send_json({"ok": True, "saved": os.path.basename(dst)})
 
     def _api_upload(self):
@@ -637,7 +650,9 @@ class Handler(BaseHTTPRequestHandler):
         os.makedirs(unrec_dir, exist_ok=True)
         used = set(os.listdir(unrec_dir)) if os.path.isdir(unrec_dir) else set()
         dst_name = _dedup_name(unrec_dir, filename, used)
-        os.replace(src, os.path.join(unrec_dir, dst_name))
+        dst = os.path.join(unrec_dir, dst_name)
+        os.replace(src, dst)
+        _touch(dst)
         self._send_json({"ok": True, "filename": dst_name})
 
     def _api_relabel_unrecognized(self):
@@ -656,6 +671,7 @@ class Handler(BaseHTTPRequestHandler):
         dst = _safe_join(self.data_root, "labeled", name, f"{label}_{original}")
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         os.replace(src, dst)
+        _touch(dst)
         self._send_json({"ok": True, "saved": os.path.basename(dst)})
 
     def _api_return_unrecognized(self):
@@ -671,7 +687,9 @@ class Handler(BaseHTTPRequestHandler):
         os.makedirs(raw_dir, exist_ok=True)
         used = set(os.listdir(raw_dir)) if os.path.isdir(raw_dir) else set()
         dst_name = _dedup_name(raw_dir, filename, used)
-        os.replace(src, os.path.join(raw_dir, dst_name))
+        dst = os.path.join(raw_dir, dst_name)
+        os.replace(src, dst)
+        _touch(dst)
         self._send_json({"ok": True, "filename": dst_name})
 
     def _api_config(self):

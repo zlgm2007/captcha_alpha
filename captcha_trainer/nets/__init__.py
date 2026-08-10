@@ -60,9 +60,11 @@ class Net(torch.nn.Module):
 
 
         if not self.word:
-            self.dropout = self.conf['Train']['DROPOUT']
+            # BiLSTM num_layers=1 时 PyTorch 忽略 dropout 参数(config DROPOUT 静默无效);
+            # 2026-08-10 曾在 fc 前加真实 Dropout 重训(fc_drop), 与无 dropout 基线统计等价
+            # (~91%), 故不加, 保持已验证配置.
             self.lstm = torch.nn.LSTM(input_size=self.out_size, hidden_size=self.out_size, bidirectional=True,
-                                      num_layers=1, dropout=self.dropout)
+                                      num_layers=1)
             self.paramters.append({'params': self.lstm.parameters()})
 
             self.loss = torch.nn.CTCLoss(blank=0, reduction='mean')

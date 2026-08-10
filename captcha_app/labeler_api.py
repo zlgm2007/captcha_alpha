@@ -182,6 +182,7 @@ class LabelerAPI:
         dst = safe_join(self.data_root, "labeled", name, f"{label}_{original}")
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         os.replace(src, dst)
+        lbl._touch(dst)
         return _json({"ok": True, "saved": os.path.basename(dst)})
 
     def _post_modify_label(self, body):
@@ -200,6 +201,7 @@ class LabelerAPI:
         original = lbl.sanitize_filename(original)
         dst = safe_join(self.data_root, "labeled", name, f"{label}_{original}")
         os.replace(src, dst)
+        lbl._touch(dst)
         return _json({"ok": True, "saved": os.path.basename(dst)})
 
     def _post_unrecognize_labeled(self, body):
@@ -220,7 +222,9 @@ class LabelerAPI:
         os.makedirs(unrec_dir, exist_ok=True)
         used = set(os.listdir(unrec_dir)) if os.path.isdir(unrec_dir) else set()
         dst_name = lbl._dedup_name(unrec_dir, filename, used)
-        os.replace(src, os.path.join(unrec_dir, dst_name))
+        dst = os.path.join(unrec_dir, dst_name)
+        os.replace(src, dst)
+        lbl._touch(dst)
         return _json({"ok": True, "filename": dst_name})
 
     def _post_relabel_unrecognized(self, body):
@@ -237,6 +241,7 @@ class LabelerAPI:
         dst = safe_join(self.data_root, "labeled", name, f"{label}_{original}")
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         os.replace(src, dst)
+        lbl._touch(dst)
         return _json({"ok": True, "saved": os.path.basename(dst)})
 
     def _post_return_unrecognized(self, body):
@@ -250,7 +255,9 @@ class LabelerAPI:
         os.makedirs(raw_dir, exist_ok=True)
         used = set(os.listdir(raw_dir)) if os.path.isdir(raw_dir) else set()
         dst_name = lbl._dedup_name(raw_dir, filename, used)
-        os.replace(src, os.path.join(raw_dir, dst_name))
+        dst = os.path.join(raw_dir, dst_name)
+        os.replace(src, dst)
+        lbl._touch(dst)
         return _json({"ok": True, "filename": dst_name})
 
     def _post_upload(self, body):

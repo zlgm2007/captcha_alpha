@@ -90,6 +90,14 @@
   .edit-box { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px; position: sticky; top: 90px; }
   #editPreview { max-width: 100%; border: 1px solid var(--border); border-radius: 6px; align-self: center; }
   #editInfo { font-size: 13px; color: var(--muted); word-break: break-all; }
+
+  /* 放大镜(未标记标注 / 无法识别 图片区域悬停局部放大) */
+  #magnifier {
+    position: fixed; width: 150px; height: 150px; border-radius: 50%;
+    border: 2px solid var(--accent); box-shadow: 0 2px 14px rgba(0,0,0,.3);
+    background: #fff no-repeat; pointer-events: none; z-index: 100;
+    display: none; image-rendering: pixelated;
+  }
 </style>
 </head>
 <body>
@@ -738,6 +746,51 @@ dz.addEventListener("drop", async (e) => {
   await uploadFiles(e.dataTransfer.files);
 });
 
+/* ---------- 放大镜(未标记标注 / 无法识别 图片区域悬停局部放大) ---------- */
+const _MAG = { L: 150, Z: 3, key: "", img: null };
+function _magHide() {
+  const lens = document.getElementById("magnifier");
+  if (lens) lens.style.display = "none";
+  _MAG.key = ""; _MAG.img = null;
+}
+function _magMove(e) {
+  let imgEl = e.target.closest("img");
+  if (!imgEl) {
+    const holder = e.target.closest(".thumb");
+    if (holder) imgEl = holder.querySelector("img");
+  }
+  if (!imgEl || !imgEl.clientWidth) { _magHide(); return; }
+  const lens = document.getElementById("magnifier");
+  const src = imgEl.currentSrc || imgEl.src;
+  if (!src) { _magHide(); return; }
+  if (src !== _MAG.key || imgEl !== _MAG.img) {
+    _MAG.key = src; _MAG.img = imgEl;
+    lens.style.backgroundImage = 'url("' + src + '")';
+    lens.style.backgroundSize =
+      (imgEl.clientWidth * _MAG.Z) + "px " + (imgEl.clientHeight * _MAG.Z) + "px";
+  }
+  const rect = imgEl.getBoundingClientRect();
+  const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), Math.max(lo, hi));
+  const half = _MAG.L / (2 * _MAG.Z);
+  const px = clamp(e.clientX - rect.left, half, rect.width - half);
+  const py = clamp(e.clientY - rect.top, half, rect.height - half);
+  lens.style.backgroundPosition =
+    -(px * _MAG.Z - _MAG.L / 2) + "px " + -(py * _MAG.Z - _MAG.L / 2) + "px";
+  let lx = clamp(e.clientX - _MAG.L / 2, 0, window.innerWidth - _MAG.L);
+  let ly = clamp(e.clientY - _MAG.L / 2, 0, window.innerHeight - _MAG.L);
+  lens.style.left = lx + "px";
+  lens.style.top = ly + "px";
+  lens.style.display = "block";
+}
+function attachMagnifier(rootSel) {
+  const root = document.querySelector(rootSel);
+  if (!root) return;
+  root.addEventListener("mousemove", _magMove);
+  root.addEventListener("mouseleave", _magHide);
+}
+attachMagnifier("#panelUnlabeled");
+attachMagnifier("#panelUnrecognized");
+
 /* ---------- 启动 ---------- */
 (async function init() {
   await loadConfig();
@@ -747,5 +800,6 @@ dz.addEventListener("drop", async (e) => {
   switchTab("unlabeled");
 })();
 </script>
+<div id="magnifier"></div>
 </body>
 </html>

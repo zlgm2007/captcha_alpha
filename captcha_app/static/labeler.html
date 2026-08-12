@@ -95,9 +95,22 @@
   #magnifier {
     position: fixed; width: 150px; height: 150px; border-radius: 50%;
     border: 2px solid var(--accent); box-shadow: 0 2px 14px rgba(0,0,0,.3);
-    background: #fff no-repeat; pointer-events: none; z-index: 100;
-    display: none; image-rendering: pixelated;
+    background: #fff; pointer-events: none; z-index: 100;
+    display: none; overflow: hidden;
   }
+  #magnifier canvas { width: 100%; height: 100%; display: block; }
+  #magMode {
+    position: fixed; right: 10px; bottom: 10px; z-index: 101;
+    display: flex; align-items: center; gap: 4px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 4px 6px; font-size: 12px; color: var(--muted);
+    user-select: none;
+  }
+  #magMode button {
+    border: 1px solid var(--border); background: transparent; color: var(--text);
+    border-radius: 5px; padding: 2px 8px; cursor: pointer; font-size: 12px;
+  }
+  #magMode button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 </style>
 </head>
 <body>
@@ -747,11 +760,103 @@ dz.addEventListener("drop", async (e) => {
 });
 
 /* ---------- 放大镜(未标记标注 / 无法识别 图片区域悬停局部放大) ---------- */
-const _MAG = { L: 150, Z: 3, key: "", img: null };
+const _MAG = { L: 150, Z: 3, mode: "usm", key: "", img: null, nat: null, lx: 0, ly: 0 };
+const _natCache = new Map();      // 原图 URL(scale=1) -> HTMLImageElement
+const _natPending = new Map();    // 原图 URL -> true(加载中)
+const _sharpCanvas = document.createElement("canvas");  // 锐化离屏
+let _lensCtx = null, _lensDPR = 0;
+
+/* 从当前 img 的 src 推导原图 URL(强制 scale=1) */
+function _natUrl(imgEl) {
+  try {
+    const u = new URL(imgEl.currentSrc || imgEl.src, location.href);
+    u.searchParams.set("scale", "1");
+    return u.href;
+  } catch (_) { return imgEl.src; }
+}
+function _loadNat(url) {
+  if (_natCache.has(url) || _natPending.has(url)) return;
+  _natPending.set(url, true);
+  const im = new Image();
+  im.onload = () => {
+    _natCache.set(url, im); _natPending.delete(url);
+    if (_MAG.key === url && _MAG.img) { _MAG.nat = im; _magRender(_MAG.img, im); }
+  };
+  im.onerror = () => _natPending.delete(url);
+  im.src = url;
+}
+/* 3x3 反锐化掩模(USM): out = in + amount*(in - 邻域平均) */
+function _sharpen(id, amount) {
+  const d = id.data, w = id.width, h = id.height;
+  const out = new Uint8ClampedArray(d);
+  const kc = 1 + 4 * amount, ks = -amount;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = (y * w + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        const c0 = d[i + c];
+        out[i + c] = c0 * kc + (d[((y - 1) * w + x) * 4 + c] + d[((y + 1) * w + x) * 4 + c]
+                             + d[(y * w + x - 1) * 4 + c] + d[(y * w + x + 1) * 4 + c]) * ks;
+      }
+    }
+  }
+  id.data.set(out);
+}
+function _magRender(imgEl, srcImg) {
+  const canvas = document.getElementById("magCanvas");
+  const dpr = window.devicePixelRatio || 1;
+  if (!_lensCtx || _lensDPR !== dpr) {
+    canvas.width = _MAG.L * dpr; canvas.height = _MAG.L * dpr;
+    _lensCtx = canvas.getContext("2d");
+    _lensCtx.scale(dpr, dpr);
+    _lensDPR = dpr;
+  }
+  const ctx = _lensCtx;
+  const nw = srcImg.naturalWidth, nh = srcImg.naturalHeight;
+  ctx.clearRect(0, 0, _MAG.L, _MAG.L);
+  if (!imgEl || !nw || !nh) return;
+  const rect = imgEl.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const half = _MAG.L / (2 * _MAG.Z);
+  const cx = Math.min(Math.max((_MAG.lx - rect.left) / rect.width * nw, half), Math.max(nw - half, half));
+  const cy = Math.min(Math.max((_MAG.ly - rect.top) / rect.height * nh, half), Math.max(nh - half, half));
+  const sw = Math.min(2 * half, nw), sh = Math.min(2 * half, nh);
+  const sx = Math.min(Math.max(cx - half, 0), Math.max(nw - sw, 0));
+  const sy = Math.min(Math.max(cy - half, 0), Math.max(nh - sh, 0));
+  const sc = _sharpCanvas;
+  sc.width = sw; sc.height = sh;
+  const sctx = sc.getContext("2d");
+  sctx.drawImage(srcImg, sx, sy, sw, sh, 0, 0, sw, sh);
+  if (_MAG.mode === "usm") {
+    try {
+      const id = sctx.getImageData(0, 0, sw, sh);
+      _sharpen(id, 0.6);
+      sctx.putImageData(id, 0, 0);
+    } catch (_) { /* 跨域/异常时退回平滑 */ }
+  }
+  ctx.imageSmoothingEnabled = _MAG.mode !== "pixel";
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(sc, 0, 0, sw, sh, 0, 0, _MAG.L, _MAG.L);
+}
+function _magUpdate(mx, my, imgEl) {
+  const lens = document.getElementById("magnifier");
+  if (!imgEl || !imgEl.clientWidth) { _magHide(); return; }
+  const url = _natUrl(imgEl);
+  if (!url) { _magHide(); return; }
+  if (url !== _MAG.key || imgEl !== _MAG.img) {
+    _MAG.key = url; _MAG.img = imgEl; _MAG.nat = _natCache.get(url) || null;
+    _loadNat(url);
+  }
+  _MAG.lx = mx; _MAG.ly = my;
+  _magRender(imgEl, _MAG.nat || imgEl);
+  lens.style.left = Math.min(Math.max(mx - _MAG.L / 2, 0), window.innerWidth - _MAG.L) + "px";
+  lens.style.top = Math.min(Math.max(my - _MAG.L / 2, 0), window.innerHeight - _MAG.L) + "px";
+  lens.style.display = "block";
+}
 function _magHide() {
   const lens = document.getElementById("magnifier");
   if (lens) lens.style.display = "none";
-  _MAG.key = ""; _MAG.img = null;
+  _MAG.key = ""; _MAG.img = null; _MAG.nat = null;
 }
 function _magMove(e) {
   let imgEl = e.target.closest("img");
@@ -759,28 +864,7 @@ function _magMove(e) {
     const holder = e.target.closest(".thumb");
     if (holder) imgEl = holder.querySelector("img");
   }
-  if (!imgEl || !imgEl.clientWidth) { _magHide(); return; }
-  const lens = document.getElementById("magnifier");
-  const src = imgEl.currentSrc || imgEl.src;
-  if (!src) { _magHide(); return; }
-  if (src !== _MAG.key || imgEl !== _MAG.img) {
-    _MAG.key = src; _MAG.img = imgEl;
-    lens.style.backgroundImage = 'url("' + src + '")';
-    lens.style.backgroundSize =
-      (imgEl.clientWidth * _MAG.Z) + "px " + (imgEl.clientHeight * _MAG.Z) + "px";
-  }
-  const rect = imgEl.getBoundingClientRect();
-  const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), Math.max(lo, hi));
-  const half = _MAG.L / (2 * _MAG.Z);
-  const px = clamp(e.clientX - rect.left, half, rect.width - half);
-  const py = clamp(e.clientY - rect.top, half, rect.height - half);
-  lens.style.backgroundPosition =
-    -(px * _MAG.Z - _MAG.L / 2) + "px " + -(py * _MAG.Z - _MAG.L / 2) + "px";
-  let lx = clamp(e.clientX - _MAG.L / 2, 0, window.innerWidth - _MAG.L);
-  let ly = clamp(e.clientY - _MAG.L / 2, 0, window.innerHeight - _MAG.L);
-  lens.style.left = lx + "px";
-  lens.style.top = ly + "px";
-  lens.style.display = "block";
+  _magUpdate(e.clientX, e.clientY, imgEl);
 }
 function attachMagnifier(rootSel) {
   const root = document.querySelector(rootSel);
@@ -790,6 +874,14 @@ function attachMagnifier(rootSel) {
 }
 attachMagnifier("#panelUnlabeled");
 attachMagnifier("#panelUnrecognized");
+/* 放大镜显示模式切换 (document 级委托, 不依赖元素时机) */
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-mode]");
+  if (!b) return;
+  _MAG.mode = b.dataset.mode;
+  document.querySelectorAll("#magMode button[data-mode]").forEach(x => x.classList.toggle("active", x === b));
+  if (_MAG.img) _magUpdate(_MAG.lx, _MAG.ly, _MAG.img);
+});
 
 /* ---------- 启动 ---------- */
 (async function init() {
@@ -800,6 +892,7 @@ attachMagnifier("#panelUnrecognized");
   switchTab("unlabeled");
 })();
 </script>
-<div id="magnifier"></div>
+<div id="magnifier"><canvas id="magCanvas"></canvas></div>
+<div id="magMode"><span>放大镜</span><button data-mode="usm" class="active">锐化</button><button data-mode="smooth">平滑</button><button data-mode="pixel">像素</button></div>
 </body>
 </html>

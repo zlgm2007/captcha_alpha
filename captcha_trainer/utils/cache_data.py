@@ -15,6 +15,7 @@ class CacheData:
                                          project_name)
         if os.path.exists(self.project_path):
             self.cache_path = os.path.join(self.project_path, "cache")
+            os.makedirs(self.cache_path, exist_ok=True)   # 新项目 cache/ 可能不存在, 需先建
         else:
             logger.error("Project {} is not exists!".format(project_name))
             exit()
@@ -23,13 +24,37 @@ class CacheData:
         self.bath_path = self.conf['System']['Path']
         self.allow_ext = []
 
-    def cache(self, base_path: str, search_type="name"):
+    def cache(self, base_path: str, search_type="name", merge_subdirs: bool = False):
+        """生成 cache(train/val + 字符集 + 持久化验证集列表).
+
+        merge_subdirs=True 时合并 base_path 下全部子目录批次: cache 记录 <子目录>/<文件>
+        相对路径, System.Path 指向 base_path 本身(LoadCache 用 os.path.join(Path, 相对路径) 读取,
+        天然支持带子目录的路径). 否则按原逻辑平铺列 base_path 单批目录.
+        """
         self.bath_path = base_path
         self.allow_ext = self.conf["System"]["Allow_Ext"]
-        if search_type == "name":
-            self.__get_label_from_name(base_path=base_path)
-        else:
+        if search_type == "file":
             self.__get_label_from_file(base_path=base_path)
+        elif merge_subdirs:
+            self.__get_label_from_subdirs(base_path=base_path)
+        else:
+            self.__get_label_from_name(base_path=base_path)
+
+    def __get_label_from_subdirs(self, base_path: str):
+        """合并模式: 收集 base_path 下各批次子目录的全部图片, 记录为 <批次>/<文件>."""
+        files = []
+        for sub in sorted(d for d in os.listdir(base_path)
+                          if os.path.isdir(os.path.join(base_path, d))
+                          and not d.startswith(".")):
+            sub_path = os.path.join(base_path, sub)
+            files.extend(
+                os.path.join(sub, f)
+                for f in sorted(os.listdir(sub_path))
+                if f.split('.')[-1].lower() in self.allow_ext
+                and not f.startswith("."))
+        logger.info("\nFiles number is {} (merged from {} subdirs).".format(
+            len(files), len({f.split("/")[0] for f in files})))
+        self.__collect_data(files, base_path, [])
 
     def __get_label_from_name(self, base_path: str):
         files = os.listdir(base_path)
@@ -69,7 +94,9 @@ class CacheData:
                 label = line_list[1]
             else:
                 filename = file
-                label = "_".join(filename.split("_")[:-1])
+                # 合并模式下 filename 含 <批次>/ 前缀, 标签必须从 basename 提取
+                # (原逻辑对单批文件名恒等, 这里统一改 basename 对两种模式都正确)
+                label = "_".join(os.path.basename(filename).split("_")[:-1])
             if filename in error_files:
                 continue
             label = label.replace(" ", "")
@@ -115,6 +142,8 @@ class CacheData:
         self.config.make_config(config_dict=self.conf, single=self.conf['Model']['Word'])
         logger.info("\nWriting Cache Data!")
         del lines
+        if not caches:
+            raise ValueError("没有可用数据(批次目录无有效图片或均被过滤), 请检查数据批次")
         logger.info("\nCache Data Number is {}".format(len(caches)))
         logger.info("\nWriting Train and Val File.".format(len(caches)))
         val = self.conf['System']['Val']
@@ -139,7 +168,7 @@ class CacheData:
         keep_val = [c for c in caches if c.split("\t")[0] in prev_val_names]
         new_pool = [c for c in caches if c.split("\t")[0] not in prev_val_names]
         if len(keep_val) < val_num and new_pool:
-            random.shuffle(new_pool)
+            random.Random(42).shuffle(new_pool)   # 固定种子: 数据不变时顶补可复现
             keep_val += new_pool[: val_num - len(keep_val)]
         val_set = keep_val[:val_num]
         val_names = {c.split("\t")[0] for c in val_set}

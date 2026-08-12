@@ -209,11 +209,13 @@ class GetLoader:
             self.val_batch_size = len(val_loader)
         # 多线程数据加载: NUM_WORKERS>0 时 CPU worker 并行读图+增强, 与 MPS 训练重叠,
         # 减少主进程等数据的时间. val 无增强, 保持单线程即可.
+        # 注意: val drop_last=False, 保证全验证集(含尾批)都被评估, 与全量评估口径一致
+        # (此前 drop_last=True 会丢尾批, 同一模型 auto 全量评估与手动导出评估数字对不上).
         num_workers = int(self.conf['Train'].get('NUM_WORKERS', 0) or 0)
         self.loaders = {
             'train': DataLoader(dataset=train_loader, batch_size=self.batch_size, shuffle=True, drop_last=True,
                                 num_workers=num_workers, collate_fn=functools.partial(_collate, transform=self.transform)),
-            'val': DataLoader(dataset=val_loader, batch_size=self.val_batch_size, shuffle=True, drop_last=True,
+            'val': DataLoader(dataset=val_loader, batch_size=self.val_batch_size, shuffle=True, drop_last=False,
                               num_workers=0, collate_fn=functools.partial(_collate, transform=self.transform)),
         }
         del val_loader

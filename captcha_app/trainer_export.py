@@ -38,18 +38,28 @@ def newest_checkpoint(ckpt_dir):
 
 
 def full_eval(net, val_loader):
-    """CPU 全验证集逐样本准确率(按正确样本数 / 总样本数)."""
+    """全验证集逐样本准确率(按正确样本数 / 总样本数), 在 CPU 上计算.
+
+    结束后恢复 net 原设备与 train/eval 态: 此前直接 eval().cpu() 会把 net 永久搬到
+    CPU 并切 eval, 训练中途命中目标时的停止复核再继续训练会因此变慢/设备不匹配.
+    """
+    device = next(net.parameters()).device
+    was_training = net.training
     net = net.eval().cpu()
-    total = correct = 0
-    with torch.no_grad():
-        for inputs, labels, labels_length in val_loader:
-            if inputs.shape[0] < 1:
-                continue
-            _, labels_list, correct_list, _ = net.tester(
-                inputs, labels, labels_length)
-            total += len(labels_list)
-            correct += len(correct_list)
-    return correct / max(1, total)
+    try:
+        total = correct = 0
+        with torch.no_grad():
+            for inputs, labels, labels_length in val_loader:
+                if inputs.shape[0] < 1:
+                    continue
+                _, labels_list, correct_list, _ = net.tester(
+                    inputs, labels, labels_length)
+                total += len(labels_list)
+                correct += len(correct_list)
+        return correct / max(1, total)
+    finally:
+        net.to(device)
+        net.train(was_training)
 
 
 def export_onnx(net, conf, models_dir, acc, epoch, step, project):

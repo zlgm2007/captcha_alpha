@@ -109,7 +109,6 @@
       <label>学习率 LR <input type="number" id="lr" step="0.0001"></label>
       <label>Batch Size <input type="number" id="batch_size"></label>
       <label>优化器 <select id="optimizer"><option>SGD</option><option>Adam</option></select></label>
-      <label>Dropout <input type="number" id="dropout" step="0.05"></label>
       <label>验证步长 TEST_STEP <input type="number" id="test_step"></label>
       <label>存档步长 SAVE_STEP <input type="number" id="save_step"></label>
       <label>加载线程 NUM_WORKERS <input type="number" id="num_workers"></label>
@@ -208,7 +207,7 @@ let curState = "idle";
 let busy = false;
 
 /* ---------- 表单 <-> hyperparams ---------- */
-const FIELDS = ["lr","batch_size","optimizer","dropout","test_step","save_step",
+const FIELDS = ["lr","batch_size","optimizer","test_step","save_step",
                 "num_workers","cnn","target_acc","target_epoch","target_cost",
                 "val","image_height"];
 function readHp() {
@@ -416,6 +415,9 @@ async function init() {
   const ps = $("projSel"), bs = $("batchSel");
   (projs.projects || []).forEach(p => { const o = document.createElement("option"); o.value = p; o.textContent = p; ps.appendChild(o); });
   (batches.batches || []).forEach(b => { const o = document.createElement("option"); o.value = b; o.textContent = b; bs.appendChild(o); });
+  const oAll = document.createElement("option");
+  oAll.value = "__all__"; oAll.textContent = "全部批次(合并)";
+  bs.appendChild(oAll);
   ps.value = (projs.projects || []).includes("apple_captcha") ? "apple_captcha" : (ps.options[0] || {}).value;
   bs.value = (batches.batches || []).includes("apple") ? "apple" : (bs.options[0] || {}).value;
   ps.addEventListener("change", () => { reloadConfig(); loadExported(); });

@@ -76,9 +76,12 @@ class TrainerAPI:
         data_count = 0
         data_path = s.get('Path', '')
         if os.path.isdir(data_path):
-            data_count = len([f for f in os.listdir(data_path)
-                              if os.path.splitext(f)[1].lower() in
-                              {".png", ".jpg", ".jpeg", ".bmp", ".webp"}])
+            # 合并模式 Path 指向 labeled/ 父目录, 需递归统计各批次图片数
+            data_count = sum(
+                1 for _root, _dirs, files in os.walk(data_path)
+                for f in files
+                if os.path.splitext(f)[1].lower() in
+                {".png", ".jpg", ".jpeg", ".bmp", ".webp"})
         return {"project": project,
                 "lr": t['LR'], "batch_size": t['BATCH_SIZE'],
                 "optimizer": t['OPTIMIZER'], "dropout": t['DROPOUT'],
@@ -133,14 +136,16 @@ class TrainerAPI:
         batch = str(body.get("batch", "")).strip()
         if not batch:
             raise ValueError("缺少数据批次")
-        data_path = safe_join(LABELED_DIR, batch)
+        # batch="__all__" 合并 labeled/ 下全部批次(cache 以 <批次>/<文件> 相对路径记录)
+        merge = batch == "__all__"
+        data_path = LABELED_DIR if merge else safe_join(LABELED_DIR, batch)
         if not os.path.isdir(data_path):
             raise ValueError(f"批次不存在: {batch}")
         self._ensure_project(project)
         transfer = bool(body.get("transfer"))
         reset = bool(body.get("reset"))
         hp = body.get("hyperparams") or {}
-        self.engine.prepare(project, data_path, hp, transfer, reset)
+        self.engine.prepare(project, data_path, hp, transfer, reset, merge=merge)
         return {"ok": True, "project": project, "batch": batch}, None
 
     def _post_start(self, body):

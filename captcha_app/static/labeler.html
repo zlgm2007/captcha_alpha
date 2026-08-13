@@ -93,7 +93,7 @@
 
   /* 放大镜(未标记标注 / 无法识别 图片区域悬停局部放大) */
   #magnifier {
-    position: fixed; width: 150px; height: 150px; border-radius: 50%;
+    position: fixed; width: 225px; height: 225px; border-radius: 50%;
     border: 2px solid var(--accent); box-shadow: 0 2px 14px rgba(0,0,0,.3);
     background: #fff; pointer-events: none; z-index: 100;
     display: none; overflow: hidden;
@@ -760,7 +760,7 @@ dz.addEventListener("drop", async (e) => {
 });
 
 /* ---------- 放大镜(未标记标注 / 无法识别 图片区域悬停局部放大) ---------- */
-const _MAG = { L: 150, Z: 3, mode: "usm", key: "", img: null, nat: null, lx: 0, ly: 0 };
+const _MAG = { L: 225, Z: 4, mode: "usm", key: "", img: null, nat: null, lx: 0, ly: 0 };
 const _natCache = new Map();      // 原图 URL(scale=1) -> HTMLImageElement
 const _natPending = new Map();    // 原图 URL -> true(加载中)
 const _sharpCanvas = document.createElement("canvas");  // 锐化离屏

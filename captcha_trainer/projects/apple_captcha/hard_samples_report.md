@@ -1,0 +1,185 @@
+# 难样本评估报告 apple_captcha
+
+验证集样本数: 786
+checkpoint(新→旧): checkpoint_apple_captcha_644_26640.tar, checkpoint_apple_captcha_642_26520.tar, checkpoint_apple_captcha_639_26400.tar, checkpoint_apple_captcha_637_26280.tar, checkpoint_apple_captcha_635_26160.tar, checkpoint_apple_captcha_633_26040.tar
+
+## 全验证集准确率
+- checkpoint_apple_captcha_644_26640.tar: 0.9351
+- checkpoint_apple_captcha_642_26520.tar: 0.9351
+- checkpoint_apple_captcha_639_26400.tar: 0.9338
+- checkpoint_apple_captcha_637_26280.tar: 0.9364
+- checkpoint_apple_captcha_635_26160.tar: 0.9351
+- checkpoint_apple_captcha_633_26040.tar: 0.9338
+
+## 最新 checkpoint 判错 (51 张)
+- `4ATV_2026-08-04-18-25-49.png`  真值 4ATV  预测 4ATN
+- `4RWC_2026-08-04-17-16-36.png`  真值 4RWC  预测 4RWZ
+- `7LHJ_2026-08-04-02-24-21.png`  真值 7LHJ  预测 ZHJ
+- `7UCFF_2026-07-31-17-08-01.png`  真值 7UCFF  预测 7UGFF
+- `7UZKW_2026-08-08-17-03-31.png`  真值 7UZKW  预测 7UZXW
+- `9DGVF_2026-08-05-14-22-36.png`  真值 9DGVF  预测 9LGVF
+- `9UPEG_2026-08-04-02-16-46.png`  真值 9UPEG  预测 9UPFG
+- `9ZMEF_2026-08-03-12-05-50.png`  真值 9ZMEF  预测 9ZNEF
+- `A9RB9_2026-08-04-11-08-24.png`  真值 A9RB9  预测 A9KB9
+- `BB3YA_2026-08-05-18-59-24.png`  真值 BB3YA  预测 B33YA
+- `BULHD_2026-08-05-03-16-11.png`  真值 BULHD  预测 BKULHD
+- `CKTC_2026-08-05-03-45-01.png`  真值 CKTC  预测 GKTC
+- `CTB4F_2026-08-09-14-58-11.png`  真值 CTB4F  预测 C7S4F
+- `D9FV7_2026-08-05-08-45-26.png`  真值 D9FV7  预测 B9FV7
+- `DHTK_2026-08-04-11-01-16.png`  真值 DHTK  预测 DHK
+- `E4F7_2026-08-10-05-11-45.png`  真值 E4F7  预测 E4H7
+- `E7GH_2026-08-10-04-16-02.png`  真值 E7GH  预测 F7GH
+- `EFGXW_2026-08-09-20-03-10.png`  真值 EFGXW  预测 BFGXW
+- `FT7G_2026-08-05-09-03-25.png`  真值 FT7G  预测 FTG
+- `FZLV_2026-08-08-06-17-39.png`  真值 FZLV  预测 TZLV
+- `GHSUT_2026-08-08-09-11-59.png`  真值 GHSUT  预测 CHSUT
+- `GMWN4_2026-08-03-12-47-12.png`  真值 GMWN4  预测 GMWX4
+- `HHSN4_2026-08-08-19-33-59.png`  真值 HHSN4  预测 HHEN4
+- `HTNGM_2026-08-09-08-33-30.png`  真值 HTNGM  预测 HTNCM
+- `JKST7_2026-08-04-13-47-01.png`  真值 JKST7  预测 JYST7
+- `KFGDE_2026-08-09-09-23-18.png`  真值 KFGDE  预测 KF9DE
+- `LAB3M_2026-08-05-12-43-47.png`  真值 LAB3M  预测 LA93M
+- `LKHHF_2026-08-04-14-04-46.png`  真值 LKHHF  预测 JKHHF
+- `LMEM4_2026-08-07-18-36-47.png`  真值 LMEM4  预测 LM4M4
+- `M9GD_2026-08-06-07-02-03.png`  真值 M9GD  预测 M9JGD
+- `MVJQ4_2026-08-06-07-59-29.png`  真值 MVJQ4  预测 MNJQ4
+- `PPSE_2026-07-31-17-45-18.png`  真值 PPSE  预测 PPSG
+- `QRYT_2026-08-09-06-26-58.png`  真值 QRYT  预测 QRY7
+- `QXDVB_2026-08-05-00-21-41.png`  真值 QXDVB  预测 QXKDVB
+- `RGQXG_2026-08-08-03-14-42.png`  真值 RGQXG  预测 RCQXG
+- `RJSKV_2026-08-09-18-07-22.png`  真值 RJSKV  预测 R7JSKV
+- `S3RVV_2026-08-09-00-18-40.png`  真值 S3RVV  预测 S3RVW
+- `SGNMH_2026-08-06-12-51-25.png`  真值 SGNMH  预测 SGJMH
+- `TQMF_2026-08-10-08-00-37.png`  真值 TQMF  预测 TUQMF
+- `TVM3L_2026-07-31-16-26-24.png`  真值 TVM3L  预测 TVMBL
+- `TZSH_2026-08-05-07-38-03.png`  真值 TZSH  预测 TLSH
+- `UPBF4_2026-08-03-11-29-24.png`  真值 UPBF4  预测 UPEF4
+- `UVM99_2026-08-05-07-12-15.png`  真值 UVM99  预测 UNM99
+- `V9TQ_2026-08-08-23-55-49.png`  真值 V9TQ  预测 M9TQ
+- `VFJM4_2026-08-10-06-11-31.png`  真值 VFJM4  预测 VPJM4
+- `WDNQE_2026-08-08-16-59-57.png`  真值 WDNQE  预测 WDNDE
+- `WRGL_2026-08-04-12-04-16.png`  真值 WRGL  预测 WPGL
+- `WSJQ_2026-08-04-21-57-42.png`  真值 WSJQ  预测 W3JQ
+- `XZHTG_2026-08-09-06-20-31.png`  真值 XZHTG  预测 XZFTG
+- `YPFCT_2026-08-08-15-54-30.png`  真值 YPFCT  预测 YPFGT
+- `YRQTG_2026-08-08-19-14-09.png`  真值 YRQTG  预测 YRQJG
+
+## 持续错样本 (错 ≥ 3/6 个 checkpoint, 52 张)
+- `4ATV_2026-08-04-18-25-49.png`  真值 4ATV  错 6次  [26640.tar=4ATN / 26520.tar=4ATN / 26400.tar=4ATN / 26280.tar=4ATN / 26160.tar=4ATN / 26040.tar=4ATN]
+- `4RWC_2026-08-04-17-16-36.png`  真值 4RWC  错 6次  [26640.tar=4RWZ / 26520.tar=4RWZ / 26400.tar=4RWZ / 26280.tar=4RWZ / 26160.tar=4RWZ / 26040.tar=4RWZ]
+- `7LHJ_2026-08-04-02-24-21.png`  真值 7LHJ  错 6次  [26640.tar=ZHJ / 26520.tar=ZHJ / 26400.tar=ZHJ / 26280.tar=ZHJ / 26160.tar=ZHJ / 26040.tar=ZHJ]
+- `7UCFF_2026-07-31-17-08-01.png`  真值 7UCFF  错 6次  [26640.tar=7UGFF / 26520.tar=7UGFF / 26400.tar=7UGFF / 26280.tar=7UGFF / 26160.tar=7UGFF / 26040.tar=7UGFF]
+- `7UZKW_2026-08-08-17-03-31.png`  真值 7UZKW  错 6次  [26640.tar=7UZXW / 26520.tar=7UZXW / 26400.tar=7UZXW / 26280.tar=7UZXW / 26160.tar=7UZXW / 26040.tar=7UZXW]
+- `9DGVF_2026-08-05-14-22-36.png`  真值 9DGVF  错 6次  [26640.tar=9LGVF / 26520.tar=9LGVF / 26400.tar=9LGVF / 26280.tar=9LGVF / 26160.tar=9LGVF / 26040.tar=9LGVF]
+- `9UPEG_2026-08-04-02-16-46.png`  真值 9UPEG  错 6次  [26640.tar=9UPFG / 26520.tar=9UPFG / 26400.tar=9UPFG / 26280.tar=9UPFG / 26160.tar=9UPFG / 26040.tar=9UPFG]
+- `9ZMEF_2026-08-03-12-05-50.png`  真值 9ZMEF  错 6次  [26640.tar=9ZNEF / 26520.tar=9ZNEF / 26400.tar=9ZNEF / 26280.tar=9ZNEF / 26160.tar=9ZNEF / 26040.tar=9ZNEF]
+- `A9RB9_2026-08-04-11-08-24.png`  真值 A9RB9  错 6次  [26640.tar=A9KB9 / 26520.tar=A9KB9 / 26400.tar=A9KB9 / 26280.tar=A9KB9 / 26160.tar=A9KB9 / 26040.tar=A9KB9]
+- `BB3YA_2026-08-05-18-59-24.png`  真值 BB3YA  错 6次  [26640.tar=B33YA / 26520.tar=B33YA / 26400.tar=B33YA / 26280.tar=B33YA / 26160.tar=B33YA / 26040.tar=B33YA]
+- `BULHD_2026-08-05-03-16-11.png`  真值 BULHD  错 6次  [26640.tar=BKULHD / 26520.tar=BKULHD / 26400.tar=BKULHD / 26280.tar=BKULHD / 26160.tar=BKULHD / 26040.tar=BKULHD]
+- `CKTC_2026-08-05-03-45-01.png`  真值 CKTC  错 6次  [26640.tar=GKTC / 26520.tar=GKTC / 26400.tar=GKTC / 26280.tar=GKTC / 26160.tar=GKTC / 26040.tar=GKTC]
+- `CTB4F_2026-08-09-14-58-11.png`  真值 CTB4F  错 6次  [26640.tar=C7S4F / 26520.tar=C7S4F / 26400.tar=C7S4F / 26280.tar=C7S4F / 26160.tar=C7S4F / 26040.tar=C7S4F]
+- `D9FV7_2026-08-05-08-45-26.png`  真值 D9FV7  错 6次  [26640.tar=B9FV7 / 26520.tar=B9FV7 / 26400.tar=B9FV7 / 26280.tar=B9FV7 / 26160.tar=B9FV7 / 26040.tar=B9FV7]
+- `DHTK_2026-08-04-11-01-16.png`  真值 DHTK  错 6次  [26640.tar=DHK / 26520.tar=DHK / 26400.tar=DHK / 26280.tar=DHK / 26160.tar=DHK / 26040.tar=DHK]
+- `E4F7_2026-08-10-05-11-45.png`  真值 E4F7  错 6次  [26640.tar=E4H7 / 26520.tar=E4H7 / 26400.tar=E4H7 / 26280.tar=E4H7 / 26160.tar=E4H7 / 26040.tar=E4H7]
+- `E7GH_2026-08-10-04-16-02.png`  真值 E7GH  错 6次  [26640.tar=F7GH / 26520.tar=F7GH / 26400.tar=F7GH / 26280.tar=F7GH / 26160.tar=F7GH / 26040.tar=F7GH]
+- `FT7G_2026-08-05-09-03-25.png`  真值 FT7G  错 6次  [26640.tar=FTG / 26520.tar=FTG / 26400.tar=FTG / 26280.tar=FTG / 26160.tar=FTG / 26040.tar=FTG]
+- `FZLV_2026-08-08-06-17-39.png`  真值 FZLV  错 6次  [26640.tar=TZLV / 26520.tar=TZLV / 26400.tar=TZLV / 26280.tar=TZLV / 26160.tar=TZLV / 26040.tar=TZLV]
+- `GHSUT_2026-08-08-09-11-59.png`  真值 GHSUT  错 6次  [26640.tar=CHSUT / 26520.tar=CHSUT / 26400.tar=CHSUT / 26280.tar=CHSUT / 26160.tar=CHSUT / 26040.tar=CHSUT]
+- `GMWN4_2026-08-03-12-47-12.png`  真值 GMWN4  错 6次  [26640.tar=GMWX4 / 26520.tar=GMWX4 / 26400.tar=GMWX4 / 26280.tar=GMWX4 / 26160.tar=GMWX4 / 26040.tar=GMWX4]
+- `HHSN4_2026-08-08-19-33-59.png`  真值 HHSN4  错 6次  [26640.tar=HHEN4 / 26520.tar=HHEN4 / 26400.tar=HHEN4 / 26280.tar=HHEN4 / 26160.tar=HHEN4 / 26040.tar=HHEN4]
+- `HTNGM_2026-08-09-08-33-30.png`  真值 HTNGM  错 6次  [26640.tar=HTNCM / 26520.tar=HTNCM / 26400.tar=HTNCM / 26280.tar=HTNCM / 26160.tar=HTNCM / 26040.tar=HTNCM]
+- `JKST7_2026-08-04-13-47-01.png`  真值 JKST7  错 6次  [26640.tar=JYST7 / 26520.tar=JYST7 / 26400.tar=JYST7 / 26280.tar=JYST7 / 26160.tar=JYST7 / 26040.tar=JYST7]
+- `KFGDE_2026-08-09-09-23-18.png`  真值 KFGDE  错 6次  [26640.tar=KF9DE / 26520.tar=KF9DE / 26400.tar=KF9DE / 26280.tar=KF9DE / 26160.tar=KF9DE / 26040.tar=KF9DE]
+- `LAB3M_2026-08-05-12-43-47.png`  真值 LAB3M  错 6次  [26640.tar=LA93M / 26520.tar=LA93M / 26400.tar=LA93M / 26280.tar=LA93M / 26160.tar=LA93M / 26040.tar=LA93M]
+- `LKHHF_2026-08-04-14-04-46.png`  真值 LKHHF  错 6次  [26640.tar=JKHHF / 26520.tar=JKHHF / 26400.tar=JKHHF / 26280.tar=JKHHF / 26160.tar=JKHHF / 26040.tar=JKHHF]
+- `LMEM4_2026-08-07-18-36-47.png`  真值 LMEM4  错 6次  [26640.tar=LM4M4 / 26520.tar=LM4M4 / 26400.tar=LM4M4 / 26280.tar=LM4M4 / 26160.tar=LM4M4 / 26040.tar=LM4M4]
+- `MVJQ4_2026-08-06-07-59-29.png`  真值 MVJQ4  错 6次  [26640.tar=MNJQ4 / 26520.tar=MNJQ4 / 26400.tar=MNJQ4 / 26280.tar=MNJQ4 / 26160.tar=MNJQ4 / 26040.tar=MNJQ4]
+- `PPSE_2026-07-31-17-45-18.png`  真值 PPSE  错 6次  [26640.tar=PPSG / 26520.tar=PPSG / 26400.tar=PPSG / 26280.tar=PPSG / 26160.tar=PPSG / 26040.tar=PPSG]
+- `QRYT_2026-08-09-06-26-58.png`  真值 QRYT  错 6次  [26640.tar=QRY7 / 26520.tar=QRY7 / 26400.tar=QRY7 / 26280.tar=QRY7 / 26160.tar=QRY7 / 26040.tar=QRY7]
+- `QXDVB_2026-08-05-00-21-41.png`  真值 QXDVB  错 6次  [26640.tar=QXKDVB / 26520.tar=QXKDVB / 26400.tar=QXKDVB / 26280.tar=QXKDVB / 26160.tar=QXKDVB / 26040.tar=QXKDVB]
+- `RJSKV_2026-08-09-18-07-22.png`  真值 RJSKV  错 6次  [26640.tar=R7JSKV / 26520.tar=R7JSKV / 26400.tar=R7JSKV / 26280.tar=R7JSKV / 26160.tar=R7JSKV / 26040.tar=R7JSKV]
+- `S3RVV_2026-08-09-00-18-40.png`  真值 S3RVV  错 6次  [26640.tar=S3RVW / 26520.tar=S3RVW / 26400.tar=S3RVW / 26280.tar=S3RVW / 26160.tar=S3RVW / 26040.tar=S3RVW]
+- `SGNMH_2026-08-06-12-51-25.png`  真值 SGNMH  错 6次  [26640.tar=SGJMH / 26520.tar=SGAMH / 26400.tar=SGJMH / 26280.tar=SGAMH / 26160.tar=SGAMH / 26040.tar=SGJMH]
+- `TQMF_2026-08-10-08-00-37.png`  真值 TQMF  错 6次  [26640.tar=TUQMF / 26520.tar=TUQMF / 26400.tar=TUQMF / 26280.tar=TUQMF / 26160.tar=TUQMF / 26040.tar=TUQMF]
+- `TVM3L_2026-07-31-16-26-24.png`  真值 TVM3L  错 6次  [26640.tar=TVMBL / 26520.tar=TVMBL / 26400.tar=TVMBL / 26280.tar=TVMBL / 26160.tar=TVMBL / 26040.tar=TVMBL]
+- `TZSH_2026-08-05-07-38-03.png`  真值 TZSH  错 6次  [26640.tar=TLSH / 26520.tar=TLSH / 26400.tar=TLSH / 26280.tar=TLSH / 26160.tar=TLSH / 26040.tar=TLSH]
+- `UPBF4_2026-08-03-11-29-24.png`  真值 UPBF4  错 6次  [26640.tar=UPEF4 / 26520.tar=UPEF4 / 26400.tar=UPEF4 / 26280.tar=UPEF4 / 26160.tar=UPEF4 / 26040.tar=UPEF4]
+- `UVM99_2026-08-05-07-12-15.png`  真值 UVM99  错 6次  [26640.tar=UNM99 / 26520.tar=UNM99 / 26400.tar=UNM99 / 26280.tar=UNM99 / 26160.tar=UNM99 / 26040.tar=UNM99]
+- `V9TQ_2026-08-08-23-55-49.png`  真值 V9TQ  错 6次  [26640.tar=M9TQ / 26520.tar=M9TQ / 26400.tar=M9TQ / 26280.tar=M9TQ / 26160.tar=M9TQ / 26040.tar=M9TQ]
+- `VFJM4_2026-08-10-06-11-31.png`  真值 VFJM4  错 6次  [26640.tar=VPJM4 / 26520.tar=VPJM4 / 26400.tar=VPJM4 / 26280.tar=VPJM4 / 26160.tar=VPJM4 / 26040.tar=VPJM4]
+- `WDNQE_2026-08-08-16-59-57.png`  真值 WDNQE  错 6次  [26640.tar=WDNDE / 26520.tar=WDNDE / 26400.tar=WDNDE / 26280.tar=WDNDE / 26160.tar=WDNDE / 26040.tar=WDNDE]
+- `WRGL_2026-08-04-12-04-16.png`  真值 WRGL  错 6次  [26640.tar=WPGL / 26520.tar=WPGL / 26400.tar=WPGL / 26280.tar=WPGL / 26160.tar=WPGL / 26040.tar=WPGL]
+- `WSJQ_2026-08-04-21-57-42.png`  真值 WSJQ  错 6次  [26640.tar=W3JQ / 26520.tar=W3JQ / 26400.tar=W3JQ / 26280.tar=W3JQ / 26160.tar=W3JQ / 26040.tar=W3JQ]
+- `XZHTG_2026-08-09-06-20-31.png`  真值 XZHTG  错 6次  [26640.tar=XZFTG / 26520.tar=XZFTG / 26400.tar=XZFTG / 26280.tar=XZFTG / 26160.tar=XZFTG / 26040.tar=XZFTG]
+- `YPFCT_2026-08-08-15-54-30.png`  真值 YPFCT  错 6次  [26640.tar=YPFGT / 26520.tar=YPFGT / 26400.tar=YPFGT / 26280.tar=YPFGT / 26160.tar=YPFGT / 26040.tar=YPFGT]
+- `YRQTG_2026-08-08-19-14-09.png`  真值 YRQTG  错 6次  [26640.tar=YRQJG / 26520.tar=YRQJG / 26400.tar=YRQJG / 26280.tar=YRQJG / 26160.tar=YRQJG / 26040.tar=YRQJG]
+- `EFGXW_2026-08-09-20-03-10.png`  真值 EFGXW  错 5次  [26640.tar=BFGXW / 26520.tar=BFGXW / 26400.tar=BFGXW / 26280.tar=EFGXW / 26160.tar=BFGXW / 26040.tar=BFGXW]
+- `M9GD_2026-08-06-07-02-03.png`  真值 M9GD  错 5次  [26640.tar=M9JGD / 26520.tar=M9GD / 26400.tar=M9JGD / 26280.tar=M9JGD / 26160.tar=M9JGD / 26040.tar=M9JGD]
+- `RGQXG_2026-08-08-03-14-42.png`  真值 RGQXG  错 5次  [26640.tar=RCQXG / 26520.tar=RCQXG / 26400.tar=RCQXG / 26280.tar=RCQXG / 26160.tar=RGQXG / 26040.tar=RCQXG]
+- `DDWCR_2026-08-08-07-00-59.png`  真值 DDWCR  错 4次  [26640.tar=DDWCR / 26520.tar=DDWQR / 26400.tar=DDWQR / 26280.tar=DDWCR / 26160.tar=DDWQR / 26040.tar=DDWQR]
+
+## 整串混淆对 (真值 → 预测)
+- 4ATV → 4ATN  (1 张)
+- 4RWC → 4RWZ  (1 张)
+- 7LHJ → ZHJ  (1 张)
+- 7UCFF → 7UGFF  (1 张)
+- 7UZKW → 7UZXW  (1 张)
+- 9DGVF → 9LGVF  (1 张)
+- 9UPEG → 9UPFG  (1 张)
+- 9ZMEF → 9ZNEF  (1 张)
+- A9RB9 → A9KB9  (1 张)
+- BB3YA → B33YA  (1 张)
+- BULHD → BKULHD  (1 张)
+- CKTC → GKTC  (1 张)
+- CTB4F → C7S4F  (1 张)
+- D9FV7 → B9FV7  (1 张)
+- DHTK → DHK  (1 张)
+- E4F7 → E4H7  (1 张)
+- E7GH → F7GH  (1 张)
+- EFGXW → BFGXW  (1 张)
+- FT7G → FTG  (1 张)
+- FZLV → TZLV  (1 张)
+
+## 字符级混淆对 Top20 (真字符 → 错字符)
+- V → N  (3 次)
+- C → G  (3 次)
+- G → C  (3 次)
+- E → F  (2 次)
+- T → 7  (2 次)
+- C → Z  (1 次)
+- 7 → Z  (1 次)
+- L → H  (1 次)
+- H → J  (1 次)
+- K → X  (1 次)
+- D → L  (1 次)
+- M → N  (1 次)
+- R → K  (1 次)
+- B → 3  (1 次)
+- U → K  (1 次)
+- L → U  (1 次)
+- H → L  (1 次)
+- D → H  (1 次)
+- B → S  (1 次)
+- D → B  (1 次)
+
+## 真值字符错误分布 Top20
+- T : 16
+- F : 16
+- G : 16
+- V : 13
+- H : 13
+- M : 13
+- 4 : 10
+- 9 : 10
+- E : 9
+- S : 9
+- Q : 9
+- R : 8
+- 7 : 8
+- L : 8
+- D : 8
+- B : 8
+- W : 7
+- U : 7
+- K : 7
+- C : 6
